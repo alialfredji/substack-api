@@ -1,0 +1,357 @@
+# substack-api
+
+A typed TypeScript client and a documented REST gateway over Substack's
+**public, undocumented** API. Read-only. Cookie optional. Swagger UI included.
+
+Built for finding people and publications — profile search, subscription graphs,
+note engagement, category leaderboards — so that a tool can rank who is worth
+engaging with.
+
+- **26 routes**, every one verified against the live API
+- **Zero write endpoints**, on purpose — see [Why read-only](#why-read-only)
+- Full endpoint research, including 22 confirmed dead ends, in
+  [`docs/UPSTREAM.md`](docs/UPSTREAM.md)
+
+📖 **Browse every route: <https://alialfredji.github.io/substack-api/>**
+— documentation only, there is no hosted API. The gateway runs on your machine.
+
+---
+
+## Requirements
+
+Node **24 or newer** (developed on 25.8). No other services needed.
+
+## Quickstart
+
+```bash
+npm install
+cp .env.example .env    # optional — everything works without it
+npm run dev
+```
+
+Then open **<http://127.0.0.1:3000/docs>**. Every route is listed, documented,
+and executable from the browser with a "Try it out" button. Each one carries a
+runnable `curl` example and the equivalent TypeScript call in its description.
+
+Verify it against live Substack in one command:
+
+```bash
+npm run smoke
+```
+
+## Using it as a library
+
+```ts
+import { createSubstackClient } from './src/index.js';
+
+const substack = createSubstackClient();          // anonymous — this is fine
+
+const profile = await substack.profiles.getByHandle('alialfredji');
+console.log(profile.name, profile.subscriberCount, profile.subscriptions?.length);
+
+const people = await substack.profiles.searchAll({ query: 'ai engineer', limit: 60 });
+console.log(people.length, 'profiles, each with their subscriptions[]');
+```
+
+## The cookie model
+
+**Every route works with no cookie.** A cookie only upgrades *viewer-relative*
+fields — the ones answering "what is the relationship between the caller and this
+person". Anonymously they are all `false`:
+
+| Field | Where | Anonymous | With cookie |
+|---|---|---|---|
+| `is_subscribed` | note reactors | always `false` | correct |
+| `is_following` | note reactors | always `false` | correct |
+| `isSubscribed` / `isFollowing` / `followsViewer` | profile | always `false` | correct |
+
+Three ways to supply one, in increasing precedence:
+
+```bash
+# 1. Whole server, via .env
+SUBSTACK_COOKIE=s%3AabC123...
+```
+
+```ts
+// 2. Per client
+createSubstackClient({ cookie: process.env.SUBSTACK_COOKIE });
+```
+
+```bash
+# 3. Per request against the gateway
+curl -s http://127.0.0.1:3000/notes/314595743/reactors \
+  -H 'x-substack-cookie: s%3AabC123...'
+
+# force an anonymous upstream call even when the server has a cookie
+curl -s http://127.0.0.1:3000/profiles/alialfredji -H 'x-substack-cookie: none'
+```
+
+Both a bare `substack.sid` value and a full `Cookie` header string are accepted.
+Get it from DevTools → Application → Cookies → `substack.com` → `substack.sid`.
+**Treat it like a password** — it is full account access, and `.env` is gitignored
+for that reason.
+
+One deliberate hard failure: `unsubscribedReactors()` — "who liked this but has
+not subscribed" — **throws `SubstackAuthRequiredError` without a cookie** rather
+than returning a list. Anonymously every reactor reads `is_subscribed: false`, so
+the filter would hand back everyone while looking like it worked.
+
+## Client API
+
+Every method takes an optional trailing `opts?: CallOptions`
+(`{ cookie?: string | null; signal?: AbortSignal }`). Methods that walk pages take
+`PaginateOptions` (`{ limit?, maxPages? }`) and are bounded by default.
+
+### `substack.profiles`
+
+| Method | Notes |
+|---|---|
+| `getByHandle(handle)` | Full profile, including public `subscriptions[]` |
+| `getByUserId(userId)` | Two requests: resolves the handle first, then fetches. Cached |
+| `resolveHandle(userId)` | Numeric id → handle, via a `301`. The bridge from a note reactor to a profile |
+| `search({ query, page })` | Returns full profile objects, `subscriptions[]` included |
+| `searchAll({ query, limit, maxPages })` | Walks pages. Page size is fixed at 20 upstream |
+| `getSubscriptions(handle)` | Just the subscription list |
+| `subscriptionOverlap(a, b)` | Shared publications + count + Jaccard score |
+
+### `substack.notes`
+
+| Method | Notes |
+|---|---|
+| `reactors(noteId)` | Who liked a note. Carries `is_subscribed` / `is_following` |
+| `unsubscribedReactors(noteId)` | Liked but not subscribed. **Requires a cookie** |
+| `listByProfile(userId, { cursor, types })` | One person's notes |
+| `listSuggested({ cursor, types })` | The suggested feed |
+| `get(noteId)` | A single note |
+| `collectProfileNotes(userId, { limit, maxPages })` | Cursor-walks a profile's notes |
+| `contextUsers(page)` | Deduped "why am I seeing this" users. Only populated on the suggested feed |
+
+### `substack.publications`
+
+| Method | Notes |
+|---|---|
+| `search({ query, limit, page })` | `limit` is ignored upstream; use `page`. **Dedupe by id** — pages overlap slightly |
+| `archive(subdomain, { limit, offset, sort })` | Post list. `offset` genuinely pages |
+| `getPost(subdomain, slug)` | Slug only; there is no numeric post lookup |
+| `comments(subdomain, postId, { sort, allComments })` | Nested thread |
+| `commenters(subdomain, postId)` | Flattened, deduped people from a comment tree |
+| `recommendations(subdomain, publicationId)` | Publications this one recommends |
+| `relatedPublications(subdomain, publicationId, { limit, maxPages })` | Bounded BFS over the recommendation graph |
+| `searchPosts({ query, limit })` | Wrapped for completeness — **appears non-functional upstream** |
+
+### `substack.discovery`
+
+| Method | Notes |
+|---|---|
+| `categories()` | 32 top-level, subcategories pre-nested |
+| `findCategory(idOrSlugOrName)` | Client-side resolution — upstream rejects slugs |
+| `leaderboard(category, { page, type })` | Accepts id, slug or name. Page size fixed at 25. `type` has no effect |
+| `leaderboardAll(category, { limit, maxPages })` | Bounded walk — this paginates very deep |
+| `categoryTree()` | Grouped by `parent_tag_id` |
+
+## REST routes
+
+All `GET`. Browse and execute them at `/docs`.
+
+| Route | Purpose |
+|---|---|
+| `/health`, `/config`, `/openapi.json` | Meta. `/config` shows whether a cookie was detected |
+| `/profiles/{handle}` | Profile with subscriptions |
+| `/profiles/{handle}/subscriptions` | Subscription list only |
+| `/profiles/by-id/{userId}` | Profile by numeric id |
+| `/profiles/by-id/{userId}/handle` | Just the id → handle mapping (one request) |
+| `/profiles/search?query=&page=` | People search |
+| `/profiles/{handle}/overlap/{other}` | Subscription overlap + score |
+| `/notes/{noteId}/reactors?unsubscribedOnly=` | Who liked a note |
+| `/notes/{noteId}` | A single note |
+| `/notes/profile/{userId}` | A person's notes |
+| `/notes/profile/{userId}/context-users` | Connective users |
+| `/notes/suggested` | Suggested feed |
+| `/publications/search?query=&page=` | Newsletter search |
+| `/publications/{subdomain}/archive` | Post list |
+| `/publications/{subdomain}/posts/{slug}` | One post |
+| `/publications/{subdomain}/posts/{postId}/comments` | Comment thread |
+| `/publications/{subdomain}/posts/{postId}/commenters` | Deduped commenters |
+| `/publications/{subdomain}/recommendations?publicationId=` | Recommended publications |
+| `/publications/{subdomain}/related?publicationId=` | Recommendation-graph walk |
+| `/posts/search?query=` | Post search (non-functional upstream) |
+| `/discovery/categories`, `/discovery/categories/tree` | Taxonomy |
+| `/discovery/categories/{category}` | Resolved category |
+| `/discovery/categories/{category}/leaderboard?page=&type=` | Top publications in a category |
+
+## Examples
+
+Each file is runnable and prints compact output:
+
+```bash
+npx tsx examples/profiles.ts        # lookup, search, id->handle, overlap scoring
+npx tsx examples/notes.ts           # feeds, reactors, "liked but not subscribed"
+npx tsx examples/publications.ts    # search -> archive -> harvest commenters
+npx tsx examples/discovery.ts       # categories -> leaderboard
+```
+
+## A worked targeting pipeline
+
+The API does not let you ask *"who subscribes to publication X"* — subscriber
+lists are private and always will be. It does let you ask, for any person,
+*"what do they subscribe to"*. So you invert the query: gather candidates from
+public engagement surfaces, then score each by subscription overlap with your own
+reading.
+
+```ts
+const substack = createSubstackClient({ cookie: process.env.SUBSTACK_COOKIE });
+
+// 1. Find adjacent publications
+const top = await substack.discovery.leaderboardAll('technology', { limit: 25 });
+
+// 2. Harvest real, engaged people from their comment threads
+const candidates = new Map<number, string>();
+for (const pub of top.slice(0, 5)) {
+  if (!pub.subdomain) continue;
+  const posts = await substack.publications.archive(pub.subdomain, { limit: 5 });
+  for (const post of posts) {
+    for (const person of await substack.publications.commenters(pub.subdomain, post.id)) {
+      if (person.handle) candidates.set(person.userId, person.handle);
+    }
+  }
+}
+
+// 3. Score by how much their reading overlaps yours
+const ranked = [];
+for (const handle of candidates.values()) {
+  const { overlapCount, score } = await substack.profiles.subscriptionOverlap('alialfredji', handle);
+  if (overlapCount > 0) ranked.push({ handle, overlapCount, score });
+}
+ranked.sort((a, b) => b.score - a.score);
+
+// 4. And separately: people who already engaged with you but never subscribed
+const warm = await substack.notes.unsubscribedReactors(YOUR_NOTE_ID);
+```
+
+Step 4 is the highest-yield one — those people have already shown intent.
+
+Then act on the list **as a human**, in a browser. That split is the whole point.
+
+## Why read-only
+
+Reads here are anonymous, IP-scoped, and carry no account attribution.
+
+Writes are a different risk class entirely. Automating subscribe / follow / like /
+comment means sending your session cookie at machine speed to paths that
+Substack's own `robots.txt` disallows (`/action/`, `/subscribe`,
+`/p/*/comment/*`), and it lands directly on the Terms of Use clause written for
+exactly that — "any processes that run or are activated while you are not logged
+into Substack" — with enforcement that is explicitly discretionary and
+unappealable.
+
+Note also that the ToS prohibits crawling outright, with no public-data
+carve-out. This tool does not make that clause disappear; it just keeps the
+account-linked half of the risk off the table.
+
+So: **automate the targeting, perform the engagement yourself.** Full reasoning
+and the quoted clauses are in [`docs/UPSTREAM.md §6`](docs/UPSTREAM.md).
+
+## Upstream gotchas worth knowing before you trust a result
+
+Details and evidence for each in [`docs/UPSTREAM.md`](docs/UPSTREAM.md).
+
+- **`publication/search` degrades silently.** It returns `200` with
+  `{"results": []}` under light load, then recovers in seconds. A nonsense query
+  returns 8 fuzzy matches, so **empty means throttled, not "no matches"**. Retry
+  rather than believing it.
+- **`limit` is ignored everywhere.** Page sizes are fixed server-side: 20
+  (`profile/search`), ~18 (`publication/search`), 25 (leaderboards). `page` is
+  the only lever.
+- **`publication/search` pages overlap** — dedupe by id.
+- **One category id is a string** (`"podcast"`), and it is a valid leaderboard id.
+- **Comment threads are gated** for some publications even though counts are
+  public. An empty thread is not proof of no comments.
+- **No follower/following enumeration exists**, at all.
+- **`reaction_count` can exceed `reactors.length`.** Do not assume they agree.
+
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Server with watch reload |
+| `npm run serve` | Server, one-shot |
+| `npm run smoke` | Exercise every route against live Substack |
+| `npm test` | Unit tests (transport, config) — no network |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run build` / `npm start` | Compile to `dist/`, then run |
+| `npm run spec` | Write `openapi.json` |
+
+## Configuration
+
+All optional — see [`.env.example`](.env.example) for the annotated list.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SUBSTACK_COOKIE` | – | Session cookie. Upgrades viewer-relative fields |
+| `PORT` / `HOST` | `3000` / `127.0.0.1` | Server binding |
+| `SUBSTACK_CONCURRENCY` | `4` | Max simultaneous upstream requests |
+| `SUBSTACK_MIN_DELAY_MS` | `0` | Minimum gap between request starts |
+| `SUBSTACK_TIMEOUT_MS` | `15000` | Per-request timeout |
+| `SUBSTACK_RETRIES` | `2` | Retries on 429/5xx/network |
+| `SUBSTACK_VALIDATE` | `lenient` | `lenient` \| `strict` \| `off` |
+| `SUBSTACK_DEBUG` | `0` | Log every upstream request |
+
+### On `SUBSTACK_VALIDATE`
+
+Default is **`lenient`**: responses are validated against Zod schemas, mismatches
+are logged once to stderr, and the data is returned regardless. This is
+deliberate. The upstream is undocumented and changes without notice — breaking a
+running script because Substack added a field would be the wrong trade.
+
+Use `strict` in CI to catch drift early. Every upstream schema is a
+`z.looseObject`, so undocumented fields survive rather than being stripped.
+
+## Project layout
+
+```
+src/
+  client/
+    http.ts            transport: concurrency, retries, HTML-404 detection, cookies
+    config.ts          config resolution, cookie normalisation
+    errors.ts          typed error hierarchy
+    client.ts          composed client
+    resources/         profiles, notes, publications, discovery
+  schemas/             Zod schemas -> types + OpenAPI
+  server/
+    app.ts             Fastify + Swagger UI + error mapping
+    openapi.ts         Zod -> OpenAPI, example rendering
+    routes/            one module per resource
+docs/UPSTREAM.md       verified endpoint reference + dead ends
+examples/              runnable per-resource demos
+scripts/smoke.ts       live route sweep
+tests/                 transport + config unit tests
+```
+
+## Testing
+
+```bash
+npm test          # fast, offline, injected fetch
+npm run smoke     # live, hits real Substack
+```
+
+Unit tests cover the parts most likely to break something quietly: cookie
+precedence (including `null` meaning force-anonymous), HTML-404 translation,
+retry and backoff, timeout classification, all three validation modes, and the
+concurrency gate.
+
+`npm run smoke` is the one that catches upstream drift, since schema mismatches
+and removed endpoints only show up against real data. It reports `WARN` for
+suspicious-but-successful responses so silent degradation cannot pass as green.
+
+## Docs site
+
+[`site/`](site/) is a two-file static reference — a landing page and a
+[Scalar](https://scalar.com) rendering of the OpenAPI document. On every push to
+`main`, [`.github/workflows/pages.yml`](.github/workflows/pages.yml) typechecks,
+tests, regenerates `openapi.json`, and deploys to GitHub Pages. Nothing generated
+is committed.
+
+## License
+
+[MIT](LICENSE). Unaffiliated with Substack — this consumes undocumented endpoints
+that can change or disappear without notice.

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>substack-api — API reference</title>
+    <meta name="description" content="Interactive reference for all 26 routes of the substack-api REST gateway." />
+    <style>
+      body { margin: 0; }
+      #back {
+        position: fixed;
+        left: 1rem;
+        bottom: 1rem;
+        z-index: 10;
+        padding: 0.45rem 0.85rem;
+        border-radius: 6px;
+        background: #16161a;
+        border: 1px solid #26262c;
+        color: #e8e8ea;
+        font: 500 0.8125rem/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-decoration: none;
+      }
+      #back:hover { border-color: #8b8b96; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <a id="back" href="./">&larr; substack-api</a>
+
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script>
+      Scalar.createApiReference('#app', {
+        url: './openapi.json',
+        darkMode: true,
+      });
+    </script>
+  </body>
+</html>
