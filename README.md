@@ -26,13 +26,13 @@ Node **24 or newer** (developed on 25.8). No other services needed.
 Run it without a global install:
 
 ```bash
-npx --yes --package @alialfredji/substack-api@0.1.0 substack-api routes profiles
+npx --yes --package @alialf/substack-api@0.1.0 substack-api routes profiles
 ```
 
 Or install the binary globally:
 
 ```bash
-npm install --global @alialfredji/substack-api
+npm install --global @alialf/substack-api
 substack-api call /health
 ```
 
@@ -57,7 +57,7 @@ npm run smoke
 ## Using it as a library
 
 ```ts
-import { createSubstackClient } from '@alialfredji/substack-api';
+import { createSubstackClient } from '@alialf/substack-api';
 
 const substack = createSubstackClient();          // anonymous — this is fine
 
@@ -311,7 +311,7 @@ The repository also contains a Codex-compatible skill that invokes the published
 CLI and explains how to interpret its results:
 
 ```bash
-npx skills add alialfredji/substack-api --skill substack-api --agent codex -g -y
+npx skills add alialf/substack-api --skill substack-api --agent codex -g -y
 ```
 
 Restart Codex, then invoke `$substack-api` or ask it to query Substack profiles,

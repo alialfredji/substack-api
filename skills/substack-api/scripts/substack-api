@@ -18,5 +18,5 @@ if [[ -n "$local_dir" ]]; then
   exit 2
 fi
 
-package_ref="${SUBSTACK_API_PACKAGE:-@alialfredji/substack-api@0.1.0}"
+package_ref="${SUBSTACK_API_PACKAGE:-@alialf/substack-api@0.1.0}"
 exec npx --yes --package "$package_ref" substack-api "$@"

@@ -1,15 +1,15 @@
 {
-  "name": "@alialfredji/substack-api",
+  "name": "@alialf/substack-api",
   "version": "0.1.0",
   "description": "Typed client + documented REST gateway for Substack's public (unofficial) API endpoints. Read-only discovery and targeting; cookie optional.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alialfredji/substack-api.git"
+    "url": "git+https://github.com/alialf/substack-api.git"
   },
-  "homepage": "https://github.com/alialfredji/substack-api#readme",
+  "homepage": "https://github.com/alialf/substack-api#readme",
   "bugs": {
-    "url": "https://github.com/alialfredji/substack-api/issues"
+    "url": "https://github.com/alialf/substack-api/issues"
   },
   "keywords": [
     "substack",

@@ -1,6 +1,6 @@
 # Publishing
 
-The CLI and TypeScript library are published together as `@alialfredji/substack-api`.
+The CLI and TypeScript library are published together as `@alialf/substack-api`.
 Publishing is manual; no GitHub Actions workflow is required.
 
 ## First release
@@ -31,8 +31,8 @@ npm publish --access public
 Verify the release:
 
 ```bash
-npm view @alialfredji/substack-api version
-npx --yes --package @alialfredji/substack-api@0.1.0 substack-api call /health
+npm view @alialf/substack-api version
+npx --yes --package @alialf/substack-api@0.1.0 substack-api call /health
 ```
 
 ## Later releases
@@ -72,7 +72,7 @@ Start or restart Codex from that shell, then invoke
 Install directly from GitHub:
 
 ```bash
-npx skills add alialfredji/substack-api --skill substack-api --agent codex -g -y
+npx skills add alialf/substack-api --skill substack-api --agent codex -g -y
 ```
 
 Restart Codex after installing or updating the skill.
