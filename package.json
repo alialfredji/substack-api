@@ -5,11 +5,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alialf/substack-api.git"
+    "url": "git+https://github.com/alialfredji/substack-api.git"
   },
-  "homepage": "https://github.com/alialf/substack-api#readme",
+  "homepage": "https://github.com/alialfredji/substack-api#readme",
   "bugs": {
-    "url": "https://github.com/alialf/substack-api/issues"
+    "url": "https://github.com/alialfredji/substack-api/issues"
   },
   "keywords": [
     "substack",
