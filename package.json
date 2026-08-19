@@ -1,11 +1,33 @@
 {
-  "name": "substack-api",
+  "name": "@alialf/substack-api",
   "version": "0.1.0",
-  "private": true,
   "description": "Typed client + documented REST gateway for Substack's public (unofficial) API endpoints. Read-only discovery and targeting; cookie optional.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alialfredji/substack-api.git"
+  },
+  "homepage": "https://github.com/alialfredji/substack-api#readme",
+  "bugs": {
+    "url": "https://github.com/alialfredji/substack-api/issues"
+  },
+  "keywords": [
+    "substack",
+    "api",
+    "cli",
+    "agent",
+    "codex"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
+  },
+  "bin": {
+    "substack-api": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,7 +43,10 @@
   "scripts": {
     "dev": "tsx watch src/server/index.ts",
     "serve": "tsx src/server/index.ts",
+    "cli": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test",
     "start": "node dist/server/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Substack API"
+  short_description: "Query Substack profiles, notes, and publications"
+  default_prompt: "Use $substack-api to query Substack data and summarize the JSON results."
