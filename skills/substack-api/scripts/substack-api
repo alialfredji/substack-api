@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+local_dir="${SUBSTACK_API_DIR:-}"
+
+if [[ -n "$local_dir" ]]; then
+  if [[ -f "$local_dir/dist/cli.js" ]]; then
+    cd "$local_dir"
+    exec node dist/cli.js "$@"
+  fi
+
+  if [[ -x "$local_dir/node_modules/.bin/tsx" && -f "$local_dir/src/cli.ts" ]]; then
+    cd "$local_dir"
+    exec node_modules/.bin/tsx src/cli.ts "$@"
+  fi
+
+  echo "SUBSTACK_API_DIR is not built or installed: $local_dir" >&2
+  exit 2
+fi
+
+package_ref="${SUBSTACK_API_PACKAGE:-@alialfredji/substack-api@0.1.0}"
+exec npx --yes --package "$package_ref" substack-api "$@"

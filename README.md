@@ -21,6 +21,21 @@ engaging with.
 
 Node **24 or newer** (developed on 25.8). No other services needed.
 
+## Install the CLI
+
+Run it without a global install:
+
+```bash
+npx --yes --package @alialfredji/substack-api@0.1.0 substack-api routes profiles
+```
+
+Or install the binary globally:
+
+```bash
+npm install --global @alialfredji/substack-api
+substack-api call /health
+```
+
 ## Quickstart
 
 ```bash
@@ -42,7 +57,7 @@ npm run smoke
 ## Using it as a library
 
 ```ts
-import { createSubstackClient } from './src/index.js';
+import { createSubstackClient } from '@alialfredji/substack-api';
 
 const substack = createSubstackClient();          // anonymous — this is fine
 
@@ -269,17 +284,64 @@ Details and evidence for each in [`docs/UPSTREAM.md`](docs/UPSTREAM.md).
 - **No follower/following enumeration exists**, at all.
 - **`reaction_count` can exceed `reactors.length`.** Do not assume they agree.
 
+## Agent-friendly CLI
+
+The CLI exposes every documented route as JSON without starting a listener. It
+uses Fastify's in-process injection, so route validation, error mapping, cookies,
+and response schemas behave exactly like the REST gateway.
+
+```bash
+# installed package
+substack-api routes profiles
+substack-api describe '/profiles/{handle}'
+substack-api call '/profiles/alialfredji'
+substack-api call '/profiles/search?query=ai%20engineer&page=0' --pretty
+
+# local checkout
+npm run cli -- routes profiles
+```
+
+After building or installing the package, use the `substack-api` binary directly.
+Set `SUBSTACK_COOKIE` for viewer-relative fields, or pass `--anonymous` to force
+one call to ignore it.
+
+## Install the agent skill
+
+The repository also contains a Codex-compatible skill that invokes the published
+CLI and explains how to interpret its results:
+
+```bash
+npx skills add alialfredji/substack-api --skill substack-api --agent codex -g -y
+```
+
+Restart Codex, then invoke `$substack-api` or ask it to query Substack profiles,
+notes, publications, comments, or discovery data.
+
+To test from a local checkout before the npm package is published:
+
+```bash
+npx skills add . --skill substack-api --agent codex -y --copy
+export SUBSTACK_API_DIR=/absolute/path/to/substack-api
+```
+
+Start or restart Codex from that shell so the installed skill can use the local
+checkout.
+
 ## Scripts
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Server with watch reload |
 | `npm run serve` | Server, one-shot |
+| `npm run cli -- ...` | Discover, describe, and invoke routes as JSON |
 | `npm run smoke` | Exercise every route against live Substack |
 | `npm test` | Unit tests (transport, config) — no network |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` / `npm start` | Compile to `dist/`, then run |
 | `npm run spec` | Write `openapi.json` |
+
+See [`docs/PUBLISHING.md`](docs/PUBLISHING.md) for the manual npm release and
+skill-testing workflow.
 
 ## Configuration
 
