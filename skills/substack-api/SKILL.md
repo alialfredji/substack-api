@@ -106,6 +106,6 @@ All routes work anonymously. Set `SUBSTACK_COOKIE` in the environment only when 
 
 ## Runtime
 
-Require Node.js 24 or newer. By default, the launcher invokes the published `@alialf/substack-api@0.1.0` package through `npx`.
+Require Node.js 24 or newer. By default, the launcher invokes the published `@alialf/substack-api@0.2.0` package through `npx`.
 
 Before the npm package is published, or when developing locally, set `SUBSTACK_API_DIR` to the repository checkout. Set `SUBSTACK_API_PACKAGE` to test another published version.
