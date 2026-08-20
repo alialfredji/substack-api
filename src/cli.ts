@@ -4,6 +4,11 @@ import 'dotenv/config';
 import { buildApp } from './server/app.js';
 import { collectRoute } from './cli/collect.js';
 
+process.stdout.on('error', (error: NodeJS.ErrnoException) => {
+  if (error.code === 'EPIPE') process.exit(0);
+  throw error;
+});
+
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
 interface OpenApiParameter {

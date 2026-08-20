@@ -320,8 +320,8 @@ substack-api collect '/profiles/search?query=ai%20engineer' \
   --limit 100 \
   --max-pages 10
 
-# local checkout
-npm run cli -- routes profiles
+# local checkout; --silent keeps stdout as JSON for jq and other pipes
+npm run --silent cli -- routes profiles
 ```
 
 `call` returns one REST page. `collect` recognizes the route's page, cursor, or
@@ -378,7 +378,7 @@ checkout.
 |---|---|
 | `npm run dev` | Server with watch reload |
 | `npm run serve` | Server, one-shot |
-| `npm run cli -- ...` | Discover, describe, invoke, and collect routes as JSON |
+| `npm run --silent cli -- ...` | Discover, describe, invoke, and collect routes as pipe-safe JSON |
 | `npm run smoke` | Exercise every route against live Substack |
 | `npm test` | Unit tests (transport, config) — no network |
 | `npm run typecheck` | `tsc --noEmit` |
