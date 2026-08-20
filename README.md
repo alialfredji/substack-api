@@ -347,7 +347,7 @@ unpaginated group. Always supply a finite bound; collection does not turn
 keyword-ranked search into a complete global directory.
 
 Collection is paced by default: one upstream request at a time, with at least
-750 ms between request starts. HTTP 429, transient 5xx, and network errors are
+250 ms between request starts. HTTP 429, transient 5xx, and network errors are
 retried up to four times with exponential backoff. A `Retry-After` header pauses
 the whole client queue, not only the request that received it. After the retry
 ceiling, collection stops with a typed error rather than looping indefinitely.
@@ -403,7 +403,7 @@ All optional — see [`.env.example`](.env.example) for the annotated list.
 | `SUBSTACK_COOKIE` | – | Session cookie. Upgrades viewer-relative fields |
 | `PORT` / `HOST` | `3000` / `127.0.0.1` | Server binding |
 | `SUBSTACK_CONCURRENCY` | `1` | Max simultaneous upstream requests |
-| `SUBSTACK_MIN_DELAY_MS` | `750` | Minimum gap between request starts |
+| `SUBSTACK_MIN_DELAY_MS` | `250` | Minimum gap between request starts |
 | `SUBSTACK_TIMEOUT_MS` | `15000` | Per-request timeout |
 | `SUBSTACK_RETRIES` | `4` | Retries after the first attempt on 429/5xx/network |
 | `SUBSTACK_RETRY_BASE_DELAY_MS` | `1000` | Initial exponential-backoff delay |

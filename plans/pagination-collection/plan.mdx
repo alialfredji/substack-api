@@ -29,7 +29,7 @@ The CLI returns a stable envelope containing `items`, `count`, `pagesFetched`, `
   columns={["Control", "Default", "Behavior"]}
   rows={[
     ["Concurrency", "1", "Serializes upstream reads unless the caller deliberately opts into parallelism"],
-    ["Request spacing", "750 ms", "Leaves a minimum gap between request starts during collection"],
+    ["Request spacing", "250 ms", "Leaves a minimum gap between request starts during collection"],
     ["Retry ceiling", "4 retries", "Stops with a typed error after five total failed attempts"],
     ["Backoff", "1 s to 60 s", "Exponential delay with jitter; Retry-After seconds and HTTP dates are honored"],
     ["Shared cooldown", "On HTTP 429", "Pauses later queued requests so another collector does not immediately refill the rate limit"]

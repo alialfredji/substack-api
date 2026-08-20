@@ -27,7 +27,7 @@ export interface SubstackClientConfig {
   userAgent?: string;
   /** Max simultaneous in-flight upstream requests. Default 1. */
   concurrency?: number;
-  /** Minimum milliseconds between two request starts. Default 750. */
+  /** Minimum milliseconds between two request starts. Default 250. */
   minDelayMs?: number;
   /** Per-request timeout in ms. Default 15000. */
   timeoutMs?: number;
@@ -111,7 +111,7 @@ export function resolveConfig(overrides: SubstackClientConfig = {}): ResolvedCon
     ),
     userAgent: overrides.userAgent ?? process.env['SUBSTACK_USER_AGENT'] ?? DEFAULT_UA,
     concurrency: Math.max(1, Math.floor(overrides.concurrency ?? envNumber('SUBSTACK_CONCURRENCY', 1))),
-    minDelayMs: Math.max(0, overrides.minDelayMs ?? envNumber('SUBSTACK_MIN_DELAY_MS', 750)),
+    minDelayMs: Math.max(0, overrides.minDelayMs ?? envNumber('SUBSTACK_MIN_DELAY_MS', 250)),
     timeoutMs: overrides.timeoutMs ?? envNumber('SUBSTACK_TIMEOUT_MS', 15_000),
     retries: Math.max(0, Math.floor(overrides.retries ?? envNumber('SUBSTACK_RETRIES', 4))),
     retryBaseDelayMs: Math.max(

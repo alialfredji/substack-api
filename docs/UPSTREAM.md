@@ -68,7 +68,7 @@ Root-host search is the only endpoint seen to do this. Publication-scoped
 endpoints (`archive`, `comments`, `recommendations`) and `profile/search` kept
 working normally throughout both episodes.
 
-This client therefore defaults to concurrency `1` and a `750 ms` minimum gap.
+This client therefore defaults to concurrency `1` and a `250 ms` minimum gap.
 HTTP 429, transient 5xx, and network failures receive up to four retries with
 exponential backoff. `Retry-After` accepts seconds or an HTTP date, is capped at
 60 seconds per retry, and establishes a shared cooldown for queued requests.

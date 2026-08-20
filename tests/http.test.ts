@@ -71,7 +71,7 @@ beforeEach(() => {
     delete process.env[key];
   }
   // Production defaults are deliberately paced; unit tests use injected fetch
-  // and should not spend 750 ms between synthetic requests.
+  // and should not spend 250 ms between synthetic requests.
   process.env['SUBSTACK_MIN_DELAY_MS'] = '0';
   // Validation warnings write to stderr; keep test output readable.
   vi.spyOn(process.stderr, 'write').mockImplementation(() => true);

@@ -62,7 +62,7 @@ describe('resolveConfig', () => {
     const config = resolveConfig();
     expect(config.baseUrl).toBe('https://substack.com');
     expect(config.concurrency).toBe(1);
-    expect(config.minDelayMs).toBe(750);
+    expect(config.minDelayMs).toBe(250);
     expect(config.timeoutMs).toBe(15_000);
     expect(config.retries).toBe(4);
     expect(config.retryBaseDelayMs).toBe(1_000);
