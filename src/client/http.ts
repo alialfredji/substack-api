@@ -8,8 +8,8 @@
  *     returns ~68 KB of the marketing site. Detecting that early is the single
  *     highest-value thing this file does.
  *  2. Keep our request rate polite. Substack publishes no rate limits and did
- *     not throttle 600 concurrent reads in testing, but a bounded concurrency
- *     and an optional inter-request delay keep us from looking like an attack.
+ *     throttle sustained collection in practice, so conservative defaults,
+ *     coordinated cooldowns, and bounded retries keep collectors polite.
  *  3. Validate against Zod schemas without making validation a failure mode.
  *     The upstream is undocumented and mutates without notice, so the default
  *     mode logs mismatches and hands back the data anyway.
@@ -62,7 +62,22 @@ export interface RequestOptions<T = unknown> {
   signal?: AbortSignal;
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('Request aborted'));
+
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error('Request aborted'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 /** Bounded-concurrency gate. Keeps N requests in flight and queues the rest. */
 class Semaphore {
@@ -99,6 +114,8 @@ export class SubstackHttp {
   readonly config: ResolvedConfig;
   private readonly gate: Semaphore;
   private lastRequestStart = 0;
+  /** A 429 pauses later queued requests too, rather than only the request that hit it. */
+  private cooldownUntil = 0;
   /** Dedupes lenient-mode validation warnings so one bad field cannot flood stderr. */
   private readonly warned = new Set<string>();
 
@@ -151,14 +168,11 @@ export class SubstackHttp {
     const url = this.buildUrl(path, options);
     const release = await this.gate.acquire();
     try {
-      await this.pace();
-      const response = await this.fetchOnce(url, { ...options, redirect: 'manual' });
-      // Drain the body even though we only want the header, so the connection
-      // can be reused rather than held open by undici.
-      await response.arrayBuffer().catch(() => undefined);
-      if (this.config.debug) {
-        process.stderr.write(`[substack] GET ${response.status} (redirect probe) ${url}\n`);
-      }
+      await this.pace(options.signal);
+      const response = await this.attemptRedirectWithRetries(url, {
+        ...options,
+        redirect: 'manual',
+      });
       if (response.status < 300 || response.status >= 400) return null;
       return response.headers.get('location');
     } finally {
@@ -196,7 +210,7 @@ export class SubstackHttp {
   private async fetchJson(url: string, options: RequestOptions<unknown>): Promise<unknown> {
     const release = await this.gate.acquire();
     try {
-      await this.pace();
+      await this.pace(options.signal);
       return await this.attemptWithRetries(url, options);
     } finally {
       release();
@@ -204,14 +218,13 @@ export class SubstackHttp {
   }
 
   /** Enforce `minDelayMs` between request starts. */
-  private async pace(): Promise<void> {
+  private async pace(signal?: AbortSignal): Promise<void> {
     const { minDelayMs } = this.config;
-    if (minDelayMs <= 0) return;
     const now = Date.now();
-    const earliest = this.lastRequestStart + minDelayMs;
+    const earliest = Math.max(this.lastRequestStart + minDelayMs, this.cooldownUntil);
     // Claim our slot synchronously so concurrent callers stagger correctly.
     this.lastRequestStart = earliest > now ? earliest : now;
-    if (earliest > now) await sleep(earliest - now);
+    if (earliest > now) await sleep(earliest - now, signal);
   }
 
   private async attemptWithRetries(url: string, options: RequestOptions<unknown>): Promise<unknown> {
@@ -219,6 +232,7 @@ export class SubstackHttp {
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
+      if (attempt > 0) await this.pace(options.signal);
       const isLast = attempt === retries;
       try {
         const started = Date.now();
@@ -241,7 +255,12 @@ export class SubstackHttp {
             looksLikeHtml(body, contentType),
           );
           if (isRetryableStatus(response.status) && !isLast) {
-            await sleep(this.backoffMs(attempt, response.headers.get('retry-after')));
+            await this.waitBeforeRetry(
+              attempt,
+              response.headers.get('retry-after'),
+              response.status,
+              options.signal,
+            );
             lastError = error;
             continue;
           }
@@ -259,13 +278,70 @@ export class SubstackHttp {
           throw error;
         }
         lastError = error;
+        if (options.signal?.aborted) throw error;
         if (isLast) break;
-        await sleep(this.backoffMs(attempt, null));
+        await this.waitBeforeRetry(attempt, null, null, options.signal);
       }
     }
 
     if (lastError instanceof Error) throw lastError;
     throw new Error(`Request to ${url} failed: ${String(lastError)}`);
+  }
+
+  private async attemptRedirectWithRetries(
+    url: string,
+    options: RequestOptions<unknown>,
+  ): Promise<Response> {
+    const { retries, debug } = this.config;
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      if (attempt > 0) await this.pace(options.signal);
+      const isLast = attempt === retries;
+      try {
+        const started = Date.now();
+        const response = await this.fetchOnce(url, options);
+        const body = await response.text();
+
+        if (debug) {
+          process.stderr.write(
+            `[substack] GET ${response.status} ${Date.now() - started}ms (redirect probe) ${url}\n`,
+          );
+        }
+
+        if (isRetryableStatus(response.status)) {
+          const error = new SubstackHttpError(
+            response.status,
+            response.statusText,
+            url,
+            previewBody(body),
+            looksLikeHtml(body, response.headers.get('content-type')),
+          );
+          if (!isLast) {
+            await this.waitBeforeRetry(
+              attempt,
+              response.headers.get('retry-after'),
+              response.status,
+              options.signal,
+            );
+            lastError = error;
+            continue;
+          }
+          throw error;
+        }
+
+        return response;
+      } catch (error) {
+        if (error instanceof SubstackHttpError) throw error;
+        lastError = error;
+        if (options.signal?.aborted) throw error;
+        if (isLast) break;
+        await this.waitBeforeRetry(attempt, null, null, options.signal);
+      }
+    }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error(`Redirect probe to ${url} failed: ${String(lastError)}`);
   }
 
   private async fetchOnce(url: string, options: RequestOptions<unknown>): Promise<Response> {
@@ -315,14 +391,41 @@ export class SubstackHttp {
     }
   }
 
-  /** Exponential backoff with jitter, honouring `Retry-After` when present. */
+  private async waitBeforeRetry(
+    attempt: number,
+    retryAfter: string | null,
+    status: number | null,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const delayMs = this.backoffMs(attempt, retryAfter);
+    if (status === 429) {
+      this.cooldownUntil = Math.max(this.cooldownUntil, Date.now() + delayMs);
+    }
+    if (this.config.debug) {
+      process.stderr.write(
+        `[substack] retry ${attempt + 1}/${this.config.retries} in ${delayMs}ms` +
+          `${status === null ? '' : ` after HTTP ${status}`}\n`,
+      );
+    }
+    await sleep(delayMs, signal);
+  }
+
+  /** Exponential backoff with jitter, honouring seconds or an HTTP date in Retry-After. */
   private backoffMs(attempt: number, retryAfter: string | null): number {
+    const { retryBaseDelayMs, retryMaxDelayMs } = this.config;
     if (retryAfter) {
       const seconds = Number(retryAfter);
-      if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 30_000);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.min(seconds * 1000, retryMaxDelayMs);
+      }
+      const dateMs = Date.parse(retryAfter);
+      if (Number.isFinite(dateMs)) {
+        return Math.min(Math.max(0, dateMs - Date.now()), retryMaxDelayMs);
+      }
     }
-    const base = Math.min(500 * 2 ** attempt, 8_000);
-    return base + Math.floor(Math.random() * 250);
+    const base = Math.min(retryBaseDelayMs * 2 ** attempt, retryMaxDelayMs);
+    const jitterLimit = Math.min(250, Math.max(0, retryMaxDelayMs - base));
+    return base + Math.floor(Math.random() * (jitterLimit + 1));
   }
 
   private validate<T>(url: string, data: unknown, schema?: ZodType<T>): T {

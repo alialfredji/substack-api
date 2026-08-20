@@ -83,7 +83,8 @@ export default async function noteRoutes(app: FastifyInstance): Promise<void> {
             },
           ],
           'The upstream `comment` type is valid but often returns 0 items — that means the account ' +
-            'has no post comments, not an error.',
+            'has no post comments, not an error. For bounded cursor traversal, use `substack-api collect` ' +
+            'with this route or the typed client\'s `notes.collectProfileNotes()` helper.',
         ),
         response: {
           200: { description: 'A page of feed items.', ...responseSchema(NoteFeedPageSchema) },
@@ -121,6 +122,8 @@ export default async function noteRoutes(app: FastifyInstance): Promise<void> {
               upstream: 'GET /api/v1/reader/feed?types[]=note',
             },
           ],
+          'For bounded cursor traversal, use `substack-api collect \'/notes/suggested\'` or the typed ' +
+            'client\'s `notes.collectSuggestedNotes()` helper.',
         ),
         response: {
           200: { description: 'A page of feed items.', ...responseSchema(NoteFeedPageSchema) },

@@ -8,6 +8,8 @@ const ENV_KEYS = [
   'SUBSTACK_MIN_DELAY_MS',
   'SUBSTACK_TIMEOUT_MS',
   'SUBSTACK_RETRIES',
+  'SUBSTACK_RETRY_BASE_DELAY_MS',
+  'SUBSTACK_RETRY_MAX_DELAY_MS',
   'SUBSTACK_VALIDATE',
   'SUBSTACK_DEBUG',
 ] as const;
@@ -59,10 +61,12 @@ describe('resolveConfig', () => {
   it('applies documented defaults', () => {
     const config = resolveConfig();
     expect(config.baseUrl).toBe('https://substack.com');
-    expect(config.concurrency).toBe(4);
-    expect(config.minDelayMs).toBe(0);
+    expect(config.concurrency).toBe(1);
+    expect(config.minDelayMs).toBe(250);
     expect(config.timeoutMs).toBe(15_000);
-    expect(config.retries).toBe(2);
+    expect(config.retries).toBe(4);
+    expect(config.retryBaseDelayMs).toBe(1_000);
+    expect(config.retryMaxDelayMs).toBe(60_000);
     expect(config.validate).toBe('lenient');
     expect(config.debug).toBe(false);
   });
@@ -70,12 +74,16 @@ describe('resolveConfig', () => {
   it('reads configuration from the environment', () => {
     process.env['SUBSTACK_COOKIE'] = 'envsid';
     process.env['SUBSTACK_CONCURRENCY'] = '9';
+    process.env['SUBSTACK_RETRY_BASE_DELAY_MS'] = '1200';
+    process.env['SUBSTACK_RETRY_MAX_DELAY_MS'] = '45000';
     process.env['SUBSTACK_VALIDATE'] = 'strict';
     process.env['SUBSTACK_DEBUG'] = '1';
 
     const config = resolveConfig();
     expect(config.cookie).toBe('substack.sid=envsid');
     expect(config.concurrency).toBe(9);
+    expect(config.retryBaseDelayMs).toBe(1_200);
+    expect(config.retryMaxDelayMs).toBe(45_000);
     expect(config.validate).toBe('strict');
     expect(config.debug).toBe(true);
   });

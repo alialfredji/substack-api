@@ -197,7 +197,9 @@ export default async function profileRoutes(app: FastifyInstance): Promise<void>
           ],
           'Upstream requires `page` and returns 400 without it; this gateway defaults it to `0` for convenience. ' +
             'A `limit` param is not exposed because upstream silently ignores it — page size is a fixed 20. ' +
-            'Results carry the same viewer-relative fields as `GET /profiles/:handle`; see that route\'s notes.',
+            'Results carry the same viewer-relative fields as `GET /profiles/:handle`; see that route\'s notes. ' +
+            'For bounded multi-page collection, use `substack-api collect \'/profiles/search?query=...\' ' +
+            '--limit 100 --max-pages 10` or the typed client\'s `profiles.searchAll()` helper.',
         ),
         querystring: requestSchema(ProfileSearchQuerySchema),
         security: [{ substackCookie: [] }],

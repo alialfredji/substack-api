@@ -30,6 +30,15 @@ import {
   type Comment,
   type Commenter,
 } from '../../schemas/post.js';
+import type { Publication } from '../../schemas/common.js';
+
+/** Options for walking a publication archive with offset pagination. */
+export interface ArchiveAllOptions extends PaginateOptions {
+  /** Number of posts requested per upstream page. Default 50. */
+  pageSize?: number;
+  /** Archive ordering forwarded to Substack. Default `new`. */
+  sort?: string;
+}
 
 /**
  * Flatten a comment tree into deduplicated commenters, iteratively.
@@ -94,6 +103,52 @@ export class PublicationsResource {
   }
 
   /**
+   * Walk publication search pages with first-seen id deduplication.
+   *
+   * The endpoint sometimes degrades to `{ results: [] }` without a `more`
+   * field. That exact shape is retried once; if it repeats, the result is
+   * inconclusive and this method throws rather than silently reporting that
+   * the search was exhausted.
+   */
+  async searchAll(params: { query: string } & PaginateOptions): Promise<Publication[]> {
+    const limit = params.limit ?? 100;
+    const maxPages = params.maxPages ?? 20;
+    const byId = new Map<number, Publication>();
+    const seenPages = new Set<string>();
+
+    for (let page = 0; page < maxPages && byId.size < limit; page += 1) {
+      let result = await this.search(
+        { query: params.query, page },
+        { cookie: params.cookie, signal: params.signal },
+      );
+      if (result.results.length === 0 && result.more === undefined) {
+        result = await this.search(
+          { query: params.query, page },
+          { cookie: params.cookie, signal: params.signal },
+        );
+        if (result.results.length === 0 && result.more === undefined) {
+          throw new Error(
+            `Publication search for ${JSON.stringify(params.query)} returned an empty response without a ` +
+              `'more' field twice on page ${page}; Substack may be throttling the search endpoint.`,
+          );
+        }
+      }
+
+      const signature = result.results.map((publication) => publication.id).join(',');
+      if (seenPages.has(signature)) break;
+      seenPages.add(signature);
+
+      for (const publication of result.results) {
+        if (!byId.has(publication.id)) byId.set(publication.id, publication);
+        if (byId.size >= limit) break;
+      }
+      if (!result.more || result.results.length === 0) break;
+    }
+
+    return [...byId.values()].slice(0, limit);
+  }
+
+  /**
    * Search posts by keyword.
    *
    * Verified live: every query tried (nine distinct terms, see
@@ -138,6 +193,40 @@ export class PublicationsResource {
       cookie: opts?.cookie,
       signal: opts?.signal,
     });
+  }
+
+  /**
+   * Walk a publication archive using `offset + limit`, deduplicating posts by
+   * id and stopping on a short, empty, or repeated page.
+   */
+  async archiveAll(subdomain: string, params: ArchiveAllOptions = {}): Promise<Post[]> {
+    const limit = params.limit ?? 100;
+    const maxPages = params.maxPages ?? 20;
+    const pageSize = params.pageSize ?? 50;
+    const byId = new Map<number, Post>();
+    const seenPages = new Set<string>();
+    let offset = 0;
+
+    for (let page = 0; page < maxPages && byId.size < limit; page += 1) {
+      const requested = Math.min(pageSize, limit - byId.size);
+      const result = await this.archive(
+        subdomain,
+        { limit: requested, offset, sort: params.sort },
+        { cookie: params.cookie, signal: params.signal },
+      );
+      const signature = result.map((post) => post.id).join(',');
+      if (seenPages.has(signature)) break;
+      seenPages.add(signature);
+
+      for (const post of result) {
+        if (!byId.has(post.id)) byId.set(post.id, post);
+        if (byId.size >= limit) break;
+      }
+      if (result.length === 0 || result.length < requested) break;
+      offset += result.length;
+    }
+
+    return [...byId.values()].slice(0, limit);
   }
 
   /**

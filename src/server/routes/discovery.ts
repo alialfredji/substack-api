@@ -118,7 +118,8 @@ export default async function discoveryRoutes(app: FastifyInstance): Promise<voi
             "your own readers' other subscriptions. `:category` accepts an id, slug, or name. `type` is " +
             'accepted for forward compatibility but has been verified to have no effect upstream as of this ' +
             'writing — see `src/schemas/discovery.ts` for how that was confirmed. Upstream page size is a ' +
-            'fixed 25 regardless of any `limit`.',
+            'fixed 25 regardless of any `limit`. For bounded multi-page collection, use `substack-api collect` ' +
+            'with this route or the typed client\'s `discovery.leaderboardAll()` helper.',
           [
             {
               title: 'Top of the Technology leaderboard',

@@ -25,14 +25,18 @@ export interface SubstackClientConfig {
   baseUrl?: string;
   /** Sent as the User-Agent header. Default is a normal desktop Chrome UA. */
   userAgent?: string;
-  /** Max simultaneous in-flight upstream requests. Default 4. */
+  /** Max simultaneous in-flight upstream requests. Default 1. */
   concurrency?: number;
-  /** Minimum milliseconds between two request starts. Default 0. */
+  /** Minimum milliseconds between two request starts. Default 250. */
   minDelayMs?: number;
   /** Per-request timeout in ms. Default 15000. */
   timeoutMs?: number;
-  /** Retry attempts after the first try, for 429/5xx/network errors. Default 2. */
+  /** Retry attempts after the first try, for 429/5xx/network errors. Default 4. */
   retries?: number;
+  /** Initial exponential-backoff delay in ms. Default 1000. */
+  retryBaseDelayMs?: number;
+  /** Maximum delay for one retry, including Retry-After. Default 60000. */
+  retryMaxDelayMs?: number;
   /** Schema validation strictness. Default 'lenient'. */
   validate?: ValidationMode;
   /** Log each upstream request to stderr. Default false. */
@@ -50,6 +54,8 @@ export interface ResolvedConfig {
   minDelayMs: number;
   timeoutMs: number;
   retries: number;
+  retryBaseDelayMs: number;
+  retryMaxDelayMs: number;
   validate: ValidationMode;
   debug: boolean;
   fetchImpl: typeof fetch;
@@ -104,10 +110,18 @@ export function resolveConfig(overrides: SubstackClientConfig = {}): ResolvedCon
       '',
     ),
     userAgent: overrides.userAgent ?? process.env['SUBSTACK_USER_AGENT'] ?? DEFAULT_UA,
-    concurrency: Math.max(1, overrides.concurrency ?? envNumber('SUBSTACK_CONCURRENCY', 4)),
-    minDelayMs: overrides.minDelayMs ?? envNumber('SUBSTACK_MIN_DELAY_MS', 0),
+    concurrency: Math.max(1, Math.floor(overrides.concurrency ?? envNumber('SUBSTACK_CONCURRENCY', 1))),
+    minDelayMs: Math.max(0, overrides.minDelayMs ?? envNumber('SUBSTACK_MIN_DELAY_MS', 250)),
     timeoutMs: overrides.timeoutMs ?? envNumber('SUBSTACK_TIMEOUT_MS', 15_000),
-    retries: overrides.retries ?? envNumber('SUBSTACK_RETRIES', 2),
+    retries: Math.max(0, Math.floor(overrides.retries ?? envNumber('SUBSTACK_RETRIES', 4))),
+    retryBaseDelayMs: Math.max(
+      0,
+      overrides.retryBaseDelayMs ?? envNumber('SUBSTACK_RETRY_BASE_DELAY_MS', 1_000),
+    ),
+    retryMaxDelayMs: Math.max(
+      0,
+      overrides.retryMaxDelayMs ?? envNumber('SUBSTACK_RETRY_MAX_DELAY_MS', 60_000),
+    ),
     validate: overrides.validate ?? envValidationMode('SUBSTACK_VALIDATE', 'lenient'),
     debug: overrides.debug ?? process.env['SUBSTACK_DEBUG'] === '1',
     fetchImpl: overrides.fetchImpl ?? globalThis.fetch,

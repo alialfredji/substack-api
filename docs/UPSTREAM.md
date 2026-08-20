@@ -2,8 +2,8 @@
 
 Everything below was verified against the live API by direct probing, not taken
 from documentation — there is no documentation. Dates matter for a surface like
-this: **verified 2026-08-17**. Treat anything here as liable to change without
-notice.
+this: **core endpoints verified 2026-08-17; pagination rechecked 2026-08-20**.
+Treat anything here as liable to change without notice.
 
 Negative results are recorded deliberately. Knowing that `/api/v1/comment/{id}/restacks`
 returns 404 saves the next person an afternoon.
@@ -12,7 +12,9 @@ returns 404 saves the next person an afternoon.
 
 ## 1. Rate limits
 
-There are none published, and none discoverable at reasonable volume.
+There are none published. Different routes and traffic patterns behave
+differently, so a successful burst test must not be treated as proof that
+collection is unthrottled.
 
 Measured: 600 requests to `/api/v1/user/{handle}/public_profile`, in three
 fully-concurrent bursts of 200.
@@ -23,17 +25,16 @@ fully-concurrent bursts of 200.
 | B | 200 | 607 ms | 200 × HTTP 200 |
 | C | 200 | 468 ms | 200 × HTTP 200 |
 
-- No `429` responses.
+- No `429` responses in that specific profile-read burst.
 - No `Retry-After` header, ever.
 - No `X-RateLimit-*` headers of any kind.
 - No `cf-mitigated` header.
 - Response headers present: `server: cloudflare`, `x-served-by: Substack`,
   `cf-cache-status: DYNAMIC`, `cf-ray: …`.
 
-**The correct conclusion is not "rate limits are generous".** It is that rate
-limiting is not enforced via status codes. Unauthenticated reads are never
-*rejected*; enforcement is account-level and behavioural, and it applies to
-*writes*. See [§6](#6-why-there-are-no-write-endpoints).
+**The correct conclusion is not "rate limits are generous".** Later paginated
+collection produced real HTTP 429 responses. Treat throttling as route-, IP-,
+and traffic-pattern-dependent rather than assuming one global policy.
 
 ### 1a. The trap: silent degradation instead of 429
 
@@ -67,22 +68,32 @@ Root-host search is the only endpoint seen to do this. Publication-scoped
 endpoints (`archive`, `comments`, `recommendations`) and `profile/search` kept
 working normally throughout both episodes.
 
-This client defaults to a concurrency of 4. Cloudflare bot management can trip
-on sustained volume even without a published limit, and an IP-level block is
-annoying to unwind.
+This client therefore defaults to concurrency `1` and a `250 ms` minimum gap.
+HTTP 429, transient 5xx, and network failures receive up to four retries with
+exponential backoff. `Retry-After` accepts seconds or an HTTP date, is capped at
+60 seconds per retry, and establishes a shared cooldown for queued requests.
+The final failed attempt throws; callers do not retry forever.
 
-### 1b. Pagination does not work the way the params suggest
+### 1b. Pagination is route-specific
 
-`limit` is accepted by every endpoint that looks like it should support it, and
-**ignored by all of them**. Page sizes are fixed server-side:
+Substack does not use a common pagination contract. The confirmed collection
+routes fall into four groups:
 
-| Endpoint | Page size | Verified by |
-|---|---|---|
-| `profile/search` | **20**, fixed | `limit=3` and `limit=50` returned the identical 20 records in identical order |
-| `publication/search` | **~18–19**, fixed | `limit` 2/5/18/100 all returned the same batch |
-| `category/public/{id}/all` | **25**, fixed | `limit` accepted, no effect |
+| Strategy | Endpoint | Upstream behavior | Stop signal |
+|---|---|---|---|
+| Page | `profile/search` | 20 records per page; `limit` ignored | `more: false` |
+| Page | `publication/search` | ~18–19 records per page; ranked pages can overlap; `limit` ignored | `more: false` |
+| Page | `category/public/{id}/all` | 25 records per page; `limit` ignored | `more: false` |
+| Cursor | `reader/feed/profile/{userId}` | Pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
+| Cursor | `reader/feed` | Pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
+| Offset | Publication-scoped `archive` | `limit` is honored; advance `offset` by the number returned | Empty or short batch |
+| Unpaginated | Reactors, comments, recommendations, categories | `page`, `offset`, and/or `limit` do not expose another batch | Single response only |
 
-`page` is the only real lever. Two caveats found while confirming it:
+Collectors must also stop if a page, cursor, or batch repeats. That guard is
+important for an undocumented API where a nominal continuation field can drift
+or become stale.
+
+Three caveats found while confirming page-based routes:
 
 - `publication/search` pages are **not cleanly disjoint** — page 0 and page 1
   shared 1 of 18 ids. It is a ranked search, not a stable cursor. **Dedupe by id
@@ -94,6 +105,11 @@ annoying to unwind.
 
 `profile/search` terminates honestly — `"ai engineer"` gave 86 results over 5
 pages (20/20/20/20/6) and then `more: false`.
+
+A single search query therefore cannot be assumed to yield 100 prospects. For a
+100-person targeting workflow, run several adjacent keyword queries, bound each
+walk, and dedupe across every result by profile id. This improves coverage; it
+does not turn Substack's ranked search into a complete directory.
 
 ## 2. Authentication
 
@@ -164,8 +180,8 @@ body — Substack validates params and names them:
 | Endpoint | Returns | Notes |
 |---|---|---|
 | `/api/v1/comment/{noteId}/reactors` | **bare array** | Who liked a note. Carries `is_subscribed` / `is_following`. |
-| `/api/v1/reader/feed/profile/{userId}?types[]=note` | `{ items, originalCursorTimestamp, nextCursor }` | One person's notes. |
-| `/api/v1/reader/feed?types[]=note` | same + `trackingParameters` | Suggested feed. Anonymous returns cold-start picks. |
+| `/api/v1/reader/feed/profile/{userId}?types[]=note&cursor={cursor}` | `{ items, originalCursorTimestamp, nextCursor }` | One person's notes. Cursor-paginated. |
+| `/api/v1/reader/feed?types[]=note&cursor={cursor}` | same + `trackingParameters` | Suggested feed. Cursor-paginated; anonymous returns cold-start picks. |
 | `/api/v1/reader/comment/{noteId}` | `{ item }` | Single note. |
 
 Reactor element: `id, name, photo_url, primary_publication, bestseller_tier,
@@ -192,17 +208,17 @@ per-user reaction data on the comment; `/reactors` is the only way to get it.
 
 | Endpoint | Returns | Notes |
 |---|---|---|
-| `/api/v1/publication/search?query={q}&limit={n}` | `{ results, more }` | |
+| `/api/v1/publication/search?query={q}&page={n}` | `{ results, more }` | Ranked page search; pages can overlap. `limit` is ignored. |
 | `/api/v1/post/search?query={q}&limit={n}` | `{ focused, results, resultsWithTrackingParams, more, publications }` | |
-| `/api/v1/archive?sort=new&limit={n}` | **bare array** | *Publication-scoped.* |
-| `/api/v1/recommendations/from/{publicationId}` | **bare array** | *Publication-scoped.* Which publications this one recommends. |
-| `/api/v1/post/{postId}/comments?all_comments=true&sort=best_first` | comment tree | *Publication-scoped.* |
+| `/api/v1/archive?sort=new&limit={n}&offset={n}` | **bare array** | *Publication-scoped.* Offset-paginated; `limit` is honored. |
+| `/api/v1/recommendations/from/{publicationId}` | **bare array** | *Publication-scoped and unpaginated.* Which publications this one recommends. |
+| `/api/v1/post/{postId}/comments?all_comments=true&sort=best_first` | comment tree | *Publication-scoped and unpaginated.* |
 
 ### Discovery
 
 | Endpoint | Returns | Notes |
 |---|---|---|
-| `/api/v1/categories` | **bare array**, 32 elements | `id, created_at, updated_at, name, canonical_name, active, rank, parent_tag_id, slug, emoji` |
+| `/api/v1/categories` | **bare array**, 32 elements | Unpaginated. `id, created_at, updated_at, name, canonical_name, active, rank, parent_tag_id, slug, emoji` |
 | `/api/v1/category/public/{categoryId}/all?page=0` | `{ publications, more, title }` | 25 per page. The leaderboard. |
 
 ## 4. Confirmed dead ends
@@ -357,7 +373,8 @@ subscription overlap. That is the query the API actually supports.
 This project is read-only on purpose, and the reasoning is operational rather
 than decorative.
 
-Reads are anonymous, IP-scoped, and unthrottled. No account is attached.
+Reads are anonymous and IP-scoped by default, but can still be throttled. No
+account is attached unless the caller explicitly configures a cookie.
 
 Writes are the opposite. Automating subscribe / follow / like / comment means
 sending `substack.sid` — your account — at machine speed, to paths under

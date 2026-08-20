@@ -20,6 +20,8 @@ const ConfigSchema = z.object({
   minDelayMs: z.number().describe('Minimum gap between upstream request starts.'),
   timeoutMs: z.number(),
   retries: z.number(),
+  retryBaseDelayMs: z.number().describe('Initial exponential-backoff delay.'),
+  retryMaxDelayMs: z.number().describe('Maximum delay for one retry.'),
   validate: z.string().describe('Schema validation mode: lenient | strict | off.'),
   baseUrl: z.string(),
 });
@@ -65,6 +67,8 @@ export default async function metaRoutes(app: FastifyInstance): Promise<void> {
         minDelayMs: c.minDelayMs,
         timeoutMs: c.timeoutMs,
         retries: c.retries,
+        retryBaseDelayMs: c.retryBaseDelayMs,
+        retryMaxDelayMs: c.retryMaxDelayMs,
         validate: c.validate,
         baseUrl: c.baseUrl,
       };

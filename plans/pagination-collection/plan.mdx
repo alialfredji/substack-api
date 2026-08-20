@@ -1,0 +1,183 @@
+---
+title: Substack pagination collection
+description: Implementation and review plan for bounded multi-page collection across the typed client, CLI, REST documentation, and agent skill.
+kind: plan
+localOnly: true
+---
+
+# Substack pagination collection
+
+<Callout id="pagination-outcome" tone="success">
+  The implementation adds one bounded collection workflow across Substack's three real pagination mechanisms: numbered pages, opaque cursors, and archive offsets. Callers can now collect beyond the first response without inventing route parameters, while repeated pages, repeated cursors, throttled publication search, and unpaginated routes fail safely.
+</Callout>
+
+The primary user workflow is now:
+
+```bash
+substack-api collect '/profiles/search?query=ai%20engineer' \
+  --limit 100 \
+  --max-pages 10
+```
+
+The CLI returns a stable envelope containing `items`, `count`, `pagesFetched`, `exhausted`, and `continuation`. The same bounded behavior is available through typed client helpers for profile search, publication search, Notes feeds, archives, and category leaderboards.
+
+## Rate-limit safety
+
+<Table
+  id="rate-limit-controls"
+  density="compact"
+  columns={["Control", "Default", "Behavior"]}
+  rows={[
+    ["Concurrency", "1", "Serializes upstream reads unless the caller deliberately opts into parallelism"],
+    ["Request spacing", "250 ms", "Leaves a minimum gap between request starts during collection"],
+    ["Retry ceiling", "4 retries", "Stops with a typed error after five total failed attempts"],
+    ["Backoff", "1 s to 60 s", "Exponential delay with jitter; Retry-After seconds and HTTP dates are honored"],
+    ["Shared cooldown", "On HTTP 429", "Pauses later queued requests so another collector does not immediately refill the rate limit"]
+  ]}
+/>
+
+<Callout id="rate-limit-stop" tone="warning">
+  Retries are intentionally bounded. Reaching the final 429 stops the collection; immediately restarting the same command would defeat the cooldown and is not considered recovery.
+</Callout>
+
+## Pagination contract
+
+<Table
+  id="pagination-matrix"
+  density="relaxed"
+  columns={["Strategy", "Routes", "Continuation", "Safety behavior"]}
+  rows={[
+    ["Page", "Profile search, publication search, category leaderboards", "Increment page while more=true", "Deduplicate ids; reject or stop on repeated result pages"],
+    ["Cursor", "Profile Notes, suggested Notes", "Pass nextCursor back unchanged", "Treat cursors as opaque; stop on missing or repeated cursors"],
+    ["Offset", "Publication archives", "Advance offset by returned batch length", "Honor a bounded page size; stop on empty, short, or repeated batches"],
+    ["Unpaginated", "Reactors, comments, recommendations, categories", "None", "CLI rejects collection instead of guessing unsupported parameters"]
+  ]}
+/>
+
+## System shape
+
+<Diagram
+  id="pagination-system"
+  data={{
+    html: "<div class='pagination-grid'><section class='diagram-panel'><strong>Caller</strong><span>CLI collect or typed *All helper</span></section><section class='diagram-panel'><strong>Bounded collector</strong><span>limit + maxPages + deduplication</span></section><div class='strategy-row'><section class='diagram-box'><strong>Page</strong><span>results / publications + more</span></section><section class='diagram-box'><strong>Cursor</strong><span>items + nextCursor</span></section><section class='diagram-box'><strong>Offset</strong><span>array + offset + limit</span></section></div><section class='diagram-panel result'><strong>Stable result</strong><span>First-seen items, exhaustion state, resumable continuation</span></section></div>",
+    css: ".pagination-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;color:var(--wf-ink)}.pagination-grid section{display:flex;min-height:96px;flex-direction:column;justify-content:center;gap:8px;padding:16px}.pagination-grid span{color:var(--wf-muted);font-size:12px}.strategy-row{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.result{grid-column:1/-1}@media(max-width:720px){.pagination-grid{grid-template-columns:1fr}.strategy-row{grid-column:auto;grid-template-columns:1fr}.result{grid-column:auto}}",
+    caption: "One bounded contract wraps three incompatible upstream pagination styles without pretending unpaginated endpoints can scroll.",
+    frame: "show",
+    renderMode: "wireframe"
+  }}
+/>
+
+## Implementation map
+
+<TabsBlock
+  id="pagination-code-map"
+  orientation="horizontal"
+  tabs={[
+    {
+      id: "cli-collector",
+      label: "CLI collector",
+      blocks: [{
+        id: "cli-collector-code",
+        type: "annotated-code",
+        data: {
+          language: "ts",
+          filename: "src/cli/collect.ts",
+          code: "while (pagesFetched < options.maxPages && items.length < options.limit) {\n  const page = await fetchPage(kind, url, options.request, options.limit - items.length);\n  pagesFetched += 1;\n\n  if (page.hasMore && page.items.length === 0) {\n    throw new Error('Upstream returned an empty page while claiming more results');\n  }\n\n  const signature = pageSignature(page.items);\n  if (seenPages.has(signature)) {\n    throw new Error('Upstream repeated the same result page');\n  }\n  seenPages.add(signature);\n  addUnique(items, seenItems, page.items, options.limit);\n}",
+          annotations: [
+            { lines: "1-3", label: "Two independent bounds", note: "Item count and request count both cap collection, preventing an undocumented endpoint from walking indefinitely." },
+            { lines: "5-7", label: "No-progress protection", note: "An empty response that still claims more data is treated as unsafe rather than silently looping." },
+            { lines: "9-14", label: "Repeated-page guard", note: "Advancing page numbers are insufficient if upstream repeats the same payload; the collector detects the actual result signature." }
+          ]
+        }
+      }]
+    },
+    {
+      id: "typed-client",
+      label: "Typed client",
+      blocks: [{
+        id: "typed-client-code",
+        type: "annotated-code",
+        data: {
+          language: "ts",
+          filename: "src/client/resources/publications.ts",
+          code: "async searchAll(params: { query: string } & PaginateOptions): Promise<Publication[]> {\n  const limit = params.limit ?? 100;\n  const maxPages = params.maxPages ?? 20;\n  const byId = new Map<number, Publication>();\n\n  for (let page = 0; page < maxPages && byId.size < limit; page += 1) {\n    let result = await this.search({ query: params.query, page }, params);\n    if (result.results.length === 0 && result.more === undefined) {\n      result = await this.search({ query: params.query, page }, params);\n      if (result.results.length === 0 && result.more === undefined) throw new Error('inconclusive');\n    }\n    for (const publication of result.results) byId.set(publication.id, publication);\n    if (!result.more || result.results.length === 0) break;\n  }\n  return [...byId.values()].slice(0, limit);\n}",
+          annotations: [
+            { lines: "2-4", label: "Bounded and deduplicated", note: "The public helper defaults to 100 results and 20 pages while preserving first-seen publication identity." },
+            { lines: "7-10", label: "Throttling is inconclusive", note: "The known empty-without-more degradation receives one retry, then throws instead of reporting false zero matches." },
+            { lines: "12-15", label: "Honest exhaustion", note: "The helper stops only on an upstream stop signal or an empty real page, then trims to the requested aggregate limit." }
+          ]
+        }
+      }]
+    },
+    {
+      id: "agent-workflow",
+      label: "Agent workflow",
+      blocks: [{
+        id: "agent-workflow-code",
+        type: "annotated-code",
+        data: {
+          language: "text",
+          filename: "skills/substack-api/SKILL.md",
+          code: "1. Use call for one page or an unpaginated response.\n2. Use collect with finite --limit and --max-pages bounds.\n3. For 100 prospects, run several adjacent keyword queries.\n4. Merge items and deduplicate profiles by id.\n5. Filter and score only after collection.\n6. Report actual coverage; ranked search is not a global directory.",
+          annotations: [
+            { lines: "1-2", label: "Clear tool choice", note: "The skill distinguishes one-page inspection from bounded collection." },
+            { lines: "3-4", label: "100-prospect reality", note: "A single query may terminate below 100 results, so adjacent queries and cross-query deduplication are required." },
+            { lines: "5-6", label: "No false completeness", note: "Filtering happens after collection and the agent must describe search coverage honestly." }
+          ]
+        }
+      }]
+    }
+  ]}
+/>
+
+## Scope and decisions
+
+<Callout id="rest-gateway-decision" tone="decision">
+  The REST gateway remains page-oriented. Its existing `page`, `cursor`, `offset`, and `limit` parameters are now documented more clearly, while aggregation lives in the typed client and CLI. This avoids duplicative `/all` HTTP endpoints and keeps the gateway a transparent proxy.
+</Callout>
+
+The release is additive and versioned as `0.2.0`. New public helpers are exported without changing existing one-page methods or response schemas. The implementation deliberately does not add pagination to reactors, comments, recommendations, categories, or post search.
+
+## Changed footprint
+
+<Table
+  id="changed-footprint"
+  density="compact"
+  columns={["Area", "Files", "Outcome"]}
+  rows={[
+    ["Typed client", "src/client/http.ts, src/client/config.ts, src/client/resources/*.ts, src/index.ts", "New collectors plus conservative pacing, shared 429 cooldowns, Retry-After, and bounded retries"],
+    ["CLI", "src/cli.ts, src/cli/collect.ts", "New collect command and stable collection envelope"],
+    ["REST/OpenAPI", "src/server/routes/*.ts", "Pagination and collection guidance attached to the affected route descriptions"],
+    ["Agent guidance", "skills/substack-api/SKILL.md", "Bounded collection and 100-prospect multi-query workflow"],
+    ["Documentation", "README.md, docs/UPSTREAM.md, examples/*.ts", "Route matrix, caveats, examples, and current verification date"],
+    ["Regression tests", "tests/http.test.ts, tests/config.test.ts, tests/cli-collect.test.ts, tests/resources-pagination.test.ts", "Page, cursor, offset, Retry-After, shared cooldown, retry ceiling, deduplication, bounds, and unsupported-route coverage"]
+  ]}
+/>
+
+## Verification status
+
+<Checklist
+  id="pagination-verification"
+  items={[
+    { id: "unit-tests", label: "Full Vitest suite passes: 4 files, 67 tests", checked: true },
+    { id: "typecheck", label: "TypeScript typecheck passes", checked: true },
+    { id: "build", label: "Production package build passes", checked: true },
+    { id: "openapi", label: "OpenAPI specification regenerates with 26 documented paths", checked: true },
+    { id: "profile-smoke", label: "Live profile collection traverses multiple numbered pages", checked: true },
+    { id: "archive-smoke", label: "Live archive collection traverses offset batches", checked: true },
+    { id: "notes-smoke", label: "Live suggested Notes collection advances an opaque cursor", checked: true },
+    { id: "leaderboard-smoke", label: "Live leaderboard collection traverses multiple pages", checked: true },
+    { id: "unsupported-smoke", label: "Live reactor collection is rejected as unpaginated", checked: true },
+    { id: "paced-smoke", label: "Live profile collection returned 25 records across two paced requests", checked: true },
+    { id: "rate-limit-tests", label: "Retry-After, shared cooldown, abort, redirect retry, and retry ceiling tests pass", checked: true },
+    { id: "primary-review", label: "Primary-agent review completed; repeated-page CLI gap fixed and covered", checked: true }
+  ]}
+/>
+
+## Review focus
+
+Reviewers should concentrate on three contracts:
+
+1. Whether `continuation` should remain a `{ parameter, value }` object for resumable CLI collection.
+2. Whether throwing on repeated pages/cursors is preferable to returning a partial result marked inconclusive.
+3. Whether REST aggregation endpoints are worth adding later for remote HTTP consumers; they are intentionally deferred from this release.
