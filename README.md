@@ -26,7 +26,7 @@ Node **24 or newer** (developed on 25.8). No other services needed.
 Run it without a global install:
 
 ```bash
-npx --yes --package @alialf/substack-api@0.1.0 substack-api routes profiles
+npx --yes --package @alialf/substack-api@0.2.0 substack-api routes profiles
 ```
 
 Or install the binary globally:

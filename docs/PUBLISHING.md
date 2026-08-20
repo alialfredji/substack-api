@@ -32,7 +32,7 @@ Verify the release:
 
 ```bash
 npm view @alialf/substack-api version
-npx --yes --package @alialf/substack-api@0.1.0 substack-api call /health
+npx --yes --package @alialf/substack-api@0.2.0 substack-api call /health
 ```
 
 ## Later releases
