@@ -32,9 +32,15 @@ async function main(): Promise<void> {
   console.log(`search: ${page.results.length} results on page 0, more=${page.more}`);
   console.log('  top result:', page.results[0]?.name, `(@${page.results[0]?.handle})`);
 
-  // searchAll: walk pages up to a bounded limit.
-  const many = await substack.profiles.searchAll({ query: 'ai engineer', limit: 40, maxPages: 3 });
-  console.log(`searchAll: collected ${many.length} profiles across up to 3 pages`);
+  // searchAll: walk pages up to a bounded limit. One ranked query may exhaust
+  // below a target such as 100, so combine adjacent queries and dedupe by id.
+  const prospects = new Map<number, (typeof page.results)[number]>();
+  for (const query of ['ai engineer', 'software architecture', 'developer tools']) {
+    const matches = await substack.profiles.searchAll({ query, limit: 100, maxPages: 10 });
+    console.log(`searchAll("${query}"): collected ${matches.length} profiles`);
+    for (const match of matches) prospects.set(match.id, match);
+  }
+  console.log(`Cross-query prospect pool: ${prospects.size} unique profiles`);
 
   // resolveHandle / getByUserId: the id -> handle bridge. Note reactors only
   // carry a numeric id, so this is what connects "who liked my note" to

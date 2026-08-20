@@ -2,6 +2,7 @@
 
 import 'dotenv/config';
 import { buildApp } from './server/app.js';
+import { collectRoute } from './cli/collect.js';
 
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
@@ -46,12 +47,14 @@ function usage(): string {
   substack-api routes [filter] [--pretty]
   substack-api describe <path-template> [--pretty]
   substack-api call <concrete-path-and-query> [--anonymous] [--pretty]
+  substack-api collect <concrete-path-and-query> [--limit N] [--max-pages N] [--anonymous] [--pretty]
 
 Examples:
   substack-api routes profiles
   substack-api describe '/profiles/{handle}'
   substack-api call '/profiles/alialfredji'
   substack-api call '/profiles/search?query=ai&page=0' --pretty
+  substack-api collect '/profiles/search?query=ai%20engineer' --limit 100 --max-pages 10
 
 Authentication:
   Set SUBSTACK_COOKIE in the environment. Use --anonymous to override it for one call.`;
@@ -71,16 +74,29 @@ function parseFlags(args: string[]): {
   positional: string[];
   pretty: boolean;
   anonymous: boolean;
+  limit?: number;
+  maxPages?: number;
 } {
   const positional: string[] = [];
   let pretty = false;
   let anonymous = false;
+  let limit: number | undefined;
+  let maxPages: number | undefined;
 
-  for (const arg of args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] as string;
     if (arg === '--pretty') {
       pretty = true;
     } else if (arg === '--anonymous') {
       anonymous = true;
+    } else if (arg === '--limit' || arg === '--max-pages') {
+      const raw = args[index + 1];
+      if (raw === undefined || raw.startsWith('--')) fail(`${arg} requires a value`);
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value <= 0) fail(`${arg} must be a positive integer`);
+      if (arg === '--limit') limit = value;
+      else maxPages = value;
+      index += 1;
     } else if (arg.startsWith('--')) {
       fail(`Unknown option: ${arg}`);
     } else {
@@ -88,7 +104,7 @@ function parseFlags(args: string[]): {
     }
   }
 
-  return { positional, pretty, anonymous };
+  return { positional, pretty, anonymous, limit, maxPages };
 }
 
 function listRoutes(spec: OpenApiDocument): RouteSummary[] {
@@ -147,7 +163,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { positional, pretty, anonymous } = parseFlags(rawArgs);
+  const { positional, pretty, anonymous, limit, maxPages } = parseFlags(rawArgs);
   const app = await buildApp({ logger: false });
 
   try {
@@ -156,7 +172,8 @@ async function main(): Promise<void> {
     const routes = listRoutes(spec);
 
     if (command === 'routes') {
-      if (anonymous) fail('--anonymous is only valid with call');
+      if (anonymous) fail('--anonymous is only valid with call or collect');
+      if (limit !== undefined || maxPages !== undefined) fail('--limit and --max-pages are only valid with collect');
       if (positional.length > 1) fail('routes accepts at most one filter');
       const filter = positional[0]?.toLowerCase();
       writeJson(
@@ -173,7 +190,8 @@ async function main(): Promise<void> {
     }
 
     if (command === 'describe') {
-      if (anonymous) fail('--anonymous is only valid with call');
+      if (anonymous) fail('--anonymous is only valid with call or collect');
+      if (limit !== undefined || maxPages !== undefined) fail('--limit and --max-pages are only valid with collect');
       if (positional.length !== 1) fail('describe requires exactly one OpenAPI path template');
       const path = positional[0] as string;
       const pathItem = spec.paths?.[path];
@@ -183,6 +201,7 @@ async function main(): Promise<void> {
     }
 
     if (command === 'call') {
+      if (limit !== undefined || maxPages !== undefined) fail('--limit and --max-pages are only valid with collect');
       if (positional.length !== 1) fail('call requires exactly one concrete path and optional query');
       const target = positional[0] as string;
       if (!target.startsWith('/')) fail('call target must start with /');
@@ -209,6 +228,31 @@ async function main(): Promise<void> {
 
       writeJson(payload, pretty);
       if (response.statusCode >= 400) process.exitCode = 1;
+      return;
+    }
+
+    if (command === 'collect') {
+      if (positional.length !== 1) fail('collect requires exactly one concrete path and optional query');
+      const target = positional[0] as string;
+      if (!target.startsWith('/')) fail('collect target must start with /');
+      if (!findConcreteRoute(routes, target)) {
+        fail(`No documented GET route matches: ${target}`);
+      }
+
+      const result = await collectRoute({
+        target,
+        limit: limit ?? 100,
+        maxPages: maxPages ?? 20,
+        request: async (url) => {
+          const response = await app.inject({
+            method: 'GET',
+            url,
+            ...(anonymous ? { headers: { 'x-substack-cookie': 'none' } } : {}),
+          });
+          return { statusCode: response.statusCode, payload: response.payload };
+        },
+      });
+      writeJson(result, pretty);
       return;
     }
 

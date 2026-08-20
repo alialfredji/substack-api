@@ -143,23 +143,32 @@ export class DiscoveryResource {
     const limit = opts?.limit ?? 100;
     const maxPages = opts?.maxPages ?? 20;
 
-    const publications: Publication[] = [];
+    const publications = new Map<number, Publication>();
+    const seenPages = new Set<string>();
     let page = 0;
     let more = true;
 
-    while (more && page < maxPages && publications.length < limit) {
+    while (more && page < maxPages && publications.size < limit) {
       const result = await this.http.request<LeaderboardPage>(`/api/v1/category/public/${id}/all`, {
         query: { page },
         schema: LeaderboardPageSchema,
         cookie: opts?.cookie,
         signal: opts?.signal,
       });
-      publications.push(...result.publications);
+      const signature = result.publications.map((publication) => publication.id).join(',');
+      if (seenPages.has(signature)) break;
+      seenPages.add(signature);
+
+      for (const publication of result.publications) {
+        if (!publications.has(publication.id)) publications.set(publication.id, publication);
+        if (publications.size >= limit) break;
+      }
       more = result.more === true;
+      if (result.publications.length === 0) break;
       page += 1;
     }
 
-    return publications.slice(0, limit);
+    return [...publications.values()].slice(0, limit);
   }
 
   /**

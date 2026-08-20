@@ -1,6 +1,6 @@
 {
   "name": "@alialf/substack-api",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Typed client + documented REST gateway for Substack's public (unofficial) API endpoints. Read-only discovery and targeting; cookie optional.",
   "license": "MIT",
   "repository": {

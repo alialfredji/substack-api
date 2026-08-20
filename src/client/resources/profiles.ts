@@ -107,18 +107,26 @@ export class ProfilesResource {
   async searchAll(params: { query: string } & PaginateOptions): Promise<Profile[]> {
     const limit = params.limit ?? 100;
     const maxPages = params.maxPages ?? 20;
-    const out: Profile[] = [];
+    const byId = new Map<number, Profile>();
+    const seenPages = new Set<string>();
 
-    for (let page = 0; page < maxPages && out.length < limit; page += 1) {
+    for (let page = 0; page < maxPages && byId.size < limit; page += 1) {
       const result = await this.search(
         { query: params.query, page },
         { cookie: params.cookie, signal: params.signal },
       );
-      out.push(...result.results);
+      const signature = result.results.map((profile) => profile.id).join(',');
+      if (seenPages.has(signature)) break;
+      seenPages.add(signature);
+
+      for (const profile of result.results) {
+        if (!byId.has(profile.id)) byId.set(profile.id, profile);
+        if (byId.size >= limit) break;
+      }
       if (!result.more || result.results.length === 0) break;
     }
 
-    return out.slice(0, limit);
+    return [...byId.values()].slice(0, limit);
   }
 
   /**

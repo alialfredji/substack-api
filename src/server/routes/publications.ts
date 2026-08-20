@@ -108,7 +108,9 @@ export default async function publicationRoutes(app: FastifyInstance): Promise<v
           '`limit` is forwarded but verified to have no observed effect on how many results come back — Substack ' +
             'returns a fixed ~18-19 item batch regardless. Increment `page` to see more. Also verified: under ' +
             'sustained use this endpoint can degrade to an empty `results` array with the `more` key missing ' +
-            'entirely, even for a query with real matches minutes earlier — treat that as throttling, not "no matches".',
+            'entirely, even for a query with real matches minutes earlier — treat that as throttling, not "no matches". ' +
+            'For bounded multi-page collection with id deduplication, use `substack-api collect` with this route ' +
+            'or the typed client\'s `publications.searchAll()` helper.',
         ),
         querystring: requestSchema(PublicationSearchQuerySchema),
         response: {
@@ -173,6 +175,8 @@ export default async function publicationRoutes(app: FastifyInstance): Promise<v
               upstream: 'GET https://{subdomain}.substack.com/api/v1/archive',
             },
           ],
+          'This route uses real `offset + limit` pagination. For bounded aggregation, use `substack-api collect` ' +
+            'with this route or the typed client\'s `publications.archiveAll()` helper.',
         ),
         params: requestSchema(SubdomainParamSchema),
         querystring: requestSchema(ArchiveQuerySchema),

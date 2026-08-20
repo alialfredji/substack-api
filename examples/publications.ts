@@ -21,12 +21,20 @@ function log(label: string, value: unknown): void {
 }
 
 async function main(): Promise<void> {
-  // 1. Publication search. `limit` is accepted but Substack ignores it in
-  // practice — expect a fixed-size batch regardless of the value you pass.
+  // 1. Publication search. `limit` is accepted but Substack ignores it for one
+  // page — expect a fixed-size batch regardless of the value you pass.
   const pubSearch = await substack.publications.search({ query: 'ai', limit: 10 });
   log('publications.search("ai") — first 3 of ' + pubSearch.results.length, {
     more: pubSearch.more,
     sample: pubSearch.results.slice(0, 3).map((p) => ({ id: p.id, name: p.name, subdomain: p.subdomain })),
+  });
+
+  // searchAll walks ranked pages with explicit bounds and dedupes overlapping
+  // pages by publication id. Empty search responses can mean upstream
+  // degradation rather than "no matches"; see docs/UPSTREAM.md.
+  const publications = await substack.publications.searchAll({ query: 'ai', limit: 40, maxPages: 4 });
+  log(`publications.searchAll("ai") — ${publications.length} unique publications`, {
+    sample: publications.slice(0, 5).map((p) => ({ id: p.id, name: p.name, subdomain: p.subdomain })),
   });
 
   // 2. Post search. Documented as unreliable: expect empty arrays.
@@ -43,6 +51,16 @@ async function main(): Promise<void> {
   const archive = await substack.publications.archive(subdomain, { sort: 'new', limit: 5 });
   log(`publications.archive("${subdomain}") — ${archive.length} posts`, {
     sample: archive.map((p) => ({ id: p.id, slug: p.slug, title: p.title, comment_count: p.comment_count })),
+  });
+
+  // archiveAll advances the real upstream offset while keeping the walk bounded.
+  const archiveWalk = await substack.publications.archiveAll(subdomain, {
+    sort: 'new',
+    limit: 15,
+    maxPages: 3,
+  });
+  log(`publications.archiveAll("${subdomain}") — ${archiveWalk.length} posts`, {
+    sample: archiveWalk.slice(0, 5).map((p) => ({ id: p.id, slug: p.slug, title: p.title })),
   });
 
   // 4. Single post by slug.
@@ -95,10 +113,14 @@ async function main(): Promise<void> {
 
   // --- The realistic flow: niche -> publication -> archive -> commenters ---
   console.log('\n=== Discovery flow: find AI newsletters, then harvest real engaged people ===');
-  const niche = await substack.publications.search({ query: 'ai' });
-  const candidate = niche.results.find((p) => p.subdomain);
+  const niche = await substack.publications.searchAll({ query: 'ai', limit: 40, maxPages: 4 });
+  const candidate = niche.find((p) => p.subdomain);
   if (candidate?.subdomain) {
-    const posts = await substack.publications.archive(candidate.subdomain, { sort: 'top', limit: 5 });
+    const posts = await substack.publications.archiveAll(candidate.subdomain, {
+      sort: 'top',
+      limit: 20,
+      maxPages: 4,
+    });
     const withComments = posts.find((p) => (p.comment_count ?? 0) > 0);
     log(`Chose "${candidate.name}" (${candidate.subdomain})`, {
       topPosts: posts.map((p) => ({ slug: p.slug, comment_count: p.comment_count })),

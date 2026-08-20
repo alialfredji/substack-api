@@ -56,6 +56,15 @@ async function main(): Promise<void> {
   const collected = await substack.notes.collectProfileNotes(USER_ID, { limit: 30, maxPages: 5 });
   console.log(`collectProfileNotes: collected ${collected.length} items across up to 5 pages`);
 
+  // collectSuggestedNotes: the same bounded cursor walk over the suggested
+  // feed. `types` is preserved on every request.
+  const suggestedCollected = await substack.notes.collectSuggestedNotes({
+    types: ['note'],
+    limit: 30,
+    maxPages: 5,
+  });
+  console.log(`collectSuggestedNotes: collected ${suggestedCollected.length} items across up to 5 pages`);
+
   // --- The centrepiece: who liked this note but never subscribed? ---
   //
   // Needs a session cookie — without one, is_subscribed reads false for every

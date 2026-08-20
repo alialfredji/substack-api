@@ -36,6 +36,12 @@ export interface NoteFeedParams {
   types?: string[];
 }
 
+/** Options for collecting multiple cursor-paginated feed pages. */
+export interface CollectNoteFeedOptions extends PaginateOptions {
+  /** Feed item types to include. Defaults to `['note']`. */
+  types?: string[];
+}
+
 /** Notes: feeds, single notes, and who reacted to them. */
 export class NotesResource {
   constructor(private readonly http: SubstackHttp) {}
@@ -133,24 +139,57 @@ export class NotesResource {
    * returns the same cursor it was given) is treated the same as an absent
    * cursor — both mean "stop" — since that would otherwise loop forever.
    */
-  async collectProfileNotes(userId: number, opts: PaginateOptions = {}): Promise<NoteFeedItem[]> {
+  async collectProfileNotes(userId: number, opts: CollectNoteFeedOptions = {}): Promise<NoteFeedItem[]> {
     const limit = opts.limit ?? 100;
     const maxPages = opts.maxPages ?? 20;
-    const out: NoteFeedItem[] = [];
+    const byEntityKey = new Map<string, NoteFeedItem>();
+    const seenCursors = new Set<string>();
     let cursor: string | undefined;
 
-    for (let page = 0; page < maxPages && out.length < limit; page += 1) {
+    for (let page = 0; page < maxPages && byEntityKey.size < limit; page += 1) {
       const result = await this.listByProfile(
         userId,
-        { cursor },
+        { cursor, types: opts.types },
         { cookie: opts.cookie, signal: opts.signal },
       );
-      out.push(...result.items);
-      if (!result.nextCursor || result.nextCursor === cursor || result.items.length === 0) break;
+      for (const item of result.items) {
+        if (!byEntityKey.has(item.entity_key)) byEntityKey.set(item.entity_key, item);
+        if (byEntityKey.size >= limit) break;
+      }
+      if (!result.nextCursor || seenCursors.has(result.nextCursor) || result.items.length === 0) break;
+      seenCursors.add(result.nextCursor);
       cursor = result.nextCursor;
     }
 
-    return out.slice(0, limit);
+    return [...byEntityKey.values()].slice(0, limit);
+  }
+
+  /**
+   * Walk the suggested feed with the same bounded cursor semantics as
+   * {@link collectProfileNotes}.
+   */
+  async collectSuggestedNotes(opts: CollectNoteFeedOptions = {}): Promise<NoteFeedItem[]> {
+    const limit = opts.limit ?? 100;
+    const maxPages = opts.maxPages ?? 20;
+    const byEntityKey = new Map<string, NoteFeedItem>();
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+
+    for (let page = 0; page < maxPages && byEntityKey.size < limit; page += 1) {
+      const result = await this.listSuggested(
+        { cursor, types: opts.types },
+        { cookie: opts.cookie, signal: opts.signal },
+      );
+      for (const item of result.items) {
+        if (!byEntityKey.has(item.entity_key)) byEntityKey.set(item.entity_key, item);
+        if (byEntityKey.size >= limit) break;
+      }
+      if (!result.nextCursor || seenCursors.has(result.nextCursor) || result.items.length === 0) break;
+      seenCursors.add(result.nextCursor);
+      cursor = result.nextCursor;
+    }
+
+    return [...byEntityKey.values()].slice(0, limit);
   }
 
   /**

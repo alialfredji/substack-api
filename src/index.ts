@@ -47,8 +47,15 @@ export {
 
 // -- resources (exported so they can be used or extended directly) -----------
 export { ProfilesResource } from './client/resources/profiles.js';
-export { NotesResource } from './client/resources/notes.js';
-export { PublicationsResource } from './client/resources/publications.js';
+export {
+  NotesResource,
+  type NoteFeedParams,
+  type CollectNoteFeedOptions,
+} from './client/resources/notes.js';
+export {
+  PublicationsResource,
+  type ArchiveAllOptions,
+} from './client/resources/publications.js';
 export { DiscoveryResource } from './client/resources/discovery.js';
 
 // -- schemas and types -------------------------------------------------------

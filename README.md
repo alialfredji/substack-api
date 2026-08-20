@@ -117,6 +117,19 @@ Every method takes an optional trailing `opts?: CallOptions`
 (`{ cookie?: string | null; signal?: AbortSignal }`). Methods that walk pages take
 `PaginateOptions` (`{ limit?, maxPages? }`) and are bounded by default.
 
+Pagination is route-specific because the upstream API has no common convention:
+
+| Strategy | Collections | Continuation |
+|---|---|---|
+| Page | Profile search, publication search, category leaderboards | Increment `page`; stop when `more` is false |
+| Cursor | Profile Notes, suggested Notes | Pass the returned `nextCursor` |
+| Offset | Publication archives | Increase `offset` by the number of posts returned |
+| Unpaginated | Note reactors, comments, recommendations, categories | No working upstream continuation mechanism is known |
+
+Use the `*All` / `collect*` helpers below for bounded multi-page work. A `limit`
+caps collected items; `maxPages` caps upstream requests. Neither changes
+Substack's fixed or variable upstream page size.
+
 ### `substack.profiles`
 
 | Method | Notes |
@@ -125,7 +138,7 @@ Every method takes an optional trailing `opts?: CallOptions`
 | `getByUserId(userId)` | Two requests: resolves the handle first, then fetches. Cached |
 | `resolveHandle(userId)` | Numeric id → handle, via a `301`. The bridge from a note reactor to a profile |
 | `search({ query, page })` | Returns full profile objects, `subscriptions[]` included |
-| `searchAll({ query, limit, maxPages })` | Walks pages. Page size is fixed at 20 upstream |
+| `searchAll({ query, limit, maxPages })` | Bounded page walk, deduped by profile id. Page size is fixed at 20 upstream |
 | `getSubscriptions(handle)` | Just the subscription list |
 | `subscriptionOverlap(a, b)` | Shared publications + count + Jaccard score |
 
@@ -138,7 +151,8 @@ Every method takes an optional trailing `opts?: CallOptions`
 | `listByProfile(userId, { cursor, types })` | One person's notes |
 | `listSuggested({ cursor, types })` | The suggested feed |
 | `get(noteId)` | A single note |
-| `collectProfileNotes(userId, { limit, maxPages })` | Cursor-walks a profile's notes |
+| `collectProfileNotes(userId, { limit, maxPages, types })` | Bounded cursor walk over a profile's notes |
+| `collectSuggestedNotes({ limit, maxPages, types })` | Bounded cursor walk over suggested Notes |
 | `contextUsers(page)` | Deduped "why am I seeing this" users. Only populated on the suggested feed |
 
 ### `substack.publications`
@@ -146,7 +160,9 @@ Every method takes an optional trailing `opts?: CallOptions`
 | Method | Notes |
 |---|---|
 | `search({ query, limit, page })` | `limit` is ignored upstream; use `page`. **Dedupe by id** — pages overlap slightly |
+| `searchAll({ query, limit, maxPages })` | Bounded page walk, deduped by publication id. Empty results may mean throttling |
 | `archive(subdomain, { limit, offset, sort })` | Post list. `offset` genuinely pages |
+| `archiveAll(subdomain, { limit, maxPages, pageSize, sort })` | Bounded offset walk; `pageSize` controls each archive request |
 | `getPost(subdomain, slug)` | Slug only; there is no numeric post lookup |
 | `comments(subdomain, postId, { sort, allComments })` | Nested thread |
 | `commenters(subdomain, postId)` | Flattened, deduped people from a comment tree |
@@ -200,8 +216,8 @@ Each file is runnable and prints compact output:
 
 ```bash
 npx tsx examples/profiles.ts        # lookup, search, id->handle, overlap scoring
-npx tsx examples/notes.ts           # feeds, reactors, "liked but not subscribed"
-npx tsx examples/publications.ts    # search -> archive -> harvest commenters
+npx tsx examples/notes.ts           # cursor-walk feeds, reactors, "liked but not subscribed"
+npx tsx examples/publications.ts    # paged search -> archive walk -> harvest commenters
 npx tsx examples/discovery.ts       # categories -> leaderboard
 ```
 
@@ -216,34 +232,35 @@ reading.
 ```ts
 const substack = createSubstackClient({ cookie: process.env.SUBSTACK_COOKIE });
 
-// 1. Find adjacent publications
-const top = await substack.discovery.leaderboardAll('technology', { limit: 25 });
-
-// 2. Harvest real, engaged people from their comment threads
-const candidates = new Map<number, string>();
-for (const pub of top.slice(0, 5)) {
-  if (!pub.subdomain) continue;
-  const posts = await substack.publications.archive(pub.subdomain, { limit: 5 });
-  for (const post of posts) {
-    for (const person of await substack.publications.commenters(pub.subdomain, post.id)) {
-      if (person.handle) candidates.set(person.userId, person.handle);
-    }
+// 1. Search several adjacent topics. One ranked query may exhaust before 100.
+const candidates = new Map<number, { id: number; handle: string }>();
+for (const query of ['ai engineer', 'software architecture', 'developer tools']) {
+  const matches = await substack.profiles.searchAll({
+    query,
+    limit: 100,
+    maxPages: 10,
+  });
+  for (const profile of matches) {
+    if (profile.handle) candidates.set(profile.id, { id: profile.id, handle: profile.handle });
   }
 }
 
-// 3. Score by how much their reading overlaps yours
+// 2. Score the deduped candidates by how much their reading overlaps yours.
 const ranked = [];
-for (const handle of candidates.values()) {
+for (const { handle } of candidates.values()) {
   const { overlapCount, score } = await substack.profiles.subscriptionOverlap('alialfredji', handle);
   if (overlapCount > 0) ranked.push({ handle, overlapCount, score });
 }
 ranked.sort((a, b) => b.score - a.score);
 
-// 4. And separately: people who already engaged with you but never subscribed
+// 3. Separately: people who already engaged with you but never subscribed.
 const warm = await substack.notes.unsubscribedReactors(YOUR_NOTE_ID);
 ```
 
-Step 4 is the highest-yield one — those people have already shown intent.
+Search is keyword-ranked, not a complete directory. Multiple queries and
+cross-query deduplication improve coverage, but cannot guarantee 100 exact
+matches. The warm list is often the highest-yield one because those people have
+already shown intent.
 
 Then act on the list **as a human**, in a browser. That split is the whole point.
 
@@ -274,10 +291,13 @@ Details and evidence for each in [`docs/UPSTREAM.md`](docs/UPSTREAM.md).
   `{"results": []}` under light load, then recovers in seconds. A nonsense query
   returns 8 fuzzy matches, so **empty means throttled, not "no matches"**. Retry
   rather than believing it.
-- **`limit` is ignored everywhere.** Page sizes are fixed server-side: 20
-  (`profile/search`), ~18 (`publication/search`), 25 (leaderboards). `page` is
-  the only lever.
+- **Search and leaderboard `limit` values do not control page size.** Page sizes
+  are fixed upstream: 20 (`profile/search`), ~18–19
+  (`publication/search`), and 25 (leaderboards). Publication archives do honor
+  `limit` and page with `offset`.
 - **`publication/search` pages overlap** — dedupe by id.
+- **Feed pagination uses opaque cursors.** Pass `nextCursor` back unchanged and
+  stop if it is absent or repeats.
 - **One category id is a string** (`"podcast"`), and it is a valid leaderboard id.
 - **Comment threads are gated** for some publications even though counts are
   public. An empty thread is not proof of no comments.
@@ -296,10 +316,35 @@ substack-api routes profiles
 substack-api describe '/profiles/{handle}'
 substack-api call '/profiles/alialfredji'
 substack-api call '/profiles/search?query=ai%20engineer&page=0' --pretty
+substack-api collect '/profiles/search?query=ai%20engineer' \
+  --limit 100 \
+  --max-pages 10
 
 # local checkout
 npm run cli -- routes profiles
 ```
+
+`call` returns one REST page. `collect` recognizes the route's page, cursor, or
+offset strategy and returns a consistent bounded envelope:
+
+```json
+{
+  "items": ["..."],
+  "count": 100,
+  "pagesFetched": 5,
+  "exhausted": false,
+  "continuation": {
+    "parameter": "page",
+    "value": 5
+  }
+}
+```
+
+`exhausted` means the upstream collection ended. When `limit` or `maxPages`
+stops the walk first, `continuation` contains `{ parameter, value }` for the
+page, cursor, or offset needed to resume. `collect` rejects routes in the
+unpaginated group. Always supply a finite bound; collection does not turn
+keyword-ranked search into a complete global directory.
 
 After building or installing the package, use the `substack-api` binary directly.
 Set `SUBSTACK_COOKIE` for viewer-relative fields, or pass `--anonymous` to force
@@ -333,7 +378,7 @@ checkout.
 |---|---|
 | `npm run dev` | Server with watch reload |
 | `npm run serve` | Server, one-shot |
-| `npm run cli -- ...` | Discover, describe, and invoke routes as JSON |
+| `npm run cli -- ...` | Discover, describe, invoke, and collect routes as JSON |
 | `npm run smoke` | Exercise every route against live Substack |
 | `npm test` | Unit tests (transport, config) — no network |
 | `npm run typecheck` | `tsc --noEmit` |
