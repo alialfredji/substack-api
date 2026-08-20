@@ -346,6 +346,12 @@ page, cursor, or offset needed to resume. `collect` rejects routes in the
 unpaginated group. Always supply a finite bound; collection does not turn
 keyword-ranked search into a complete global directory.
 
+Collection is paced by default: one upstream request at a time, with at least
+750 ms between request starts. HTTP 429, transient 5xx, and network errors are
+retried up to four times with exponential backoff. A `Retry-After` header pauses
+the whole client queue, not only the request that received it. After the retry
+ceiling, collection stops with a typed error rather than looping indefinitely.
+
 After building or installing the package, use the `substack-api` binary directly.
 Set `SUBSTACK_COOKIE` for viewer-relative fields, or pass `--anonymous` to force
 one call to ignore it.
@@ -396,10 +402,12 @@ All optional — see [`.env.example`](.env.example) for the annotated list.
 |---|---|---|
 | `SUBSTACK_COOKIE` | – | Session cookie. Upgrades viewer-relative fields |
 | `PORT` / `HOST` | `3000` / `127.0.0.1` | Server binding |
-| `SUBSTACK_CONCURRENCY` | `4` | Max simultaneous upstream requests |
-| `SUBSTACK_MIN_DELAY_MS` | `0` | Minimum gap between request starts |
+| `SUBSTACK_CONCURRENCY` | `1` | Max simultaneous upstream requests |
+| `SUBSTACK_MIN_DELAY_MS` | `750` | Minimum gap between request starts |
 | `SUBSTACK_TIMEOUT_MS` | `15000` | Per-request timeout |
-| `SUBSTACK_RETRIES` | `2` | Retries on 429/5xx/network |
+| `SUBSTACK_RETRIES` | `4` | Retries after the first attempt on 429/5xx/network |
+| `SUBSTACK_RETRY_BASE_DELAY_MS` | `1000` | Initial exponential-backoff delay |
+| `SUBSTACK_RETRY_MAX_DELAY_MS` | `60000` | Maximum wait for one retry |
 | `SUBSTACK_VALIDATE` | `lenient` | `lenient` \| `strict` \| `off` |
 | `SUBSTACK_DEBUG` | `0` | Log every upstream request |
 
@@ -443,8 +451,8 @@ npm run smoke     # live, hits real Substack
 
 Unit tests cover the parts most likely to break something quietly: cookie
 precedence (including `null` meaning force-anonymous), HTML-404 translation,
-retry and backoff, timeout classification, all three validation modes, and the
-concurrency gate.
+retry ceilings, `Retry-After`, shared 429 cooldowns, timeout classification, all
+three validation modes, and the concurrency gate.
 
 `npm run smoke` is the one that catches upstream drift, since schema mismatches
 and removed endpoints only show up against real data. It reports `WARN` for

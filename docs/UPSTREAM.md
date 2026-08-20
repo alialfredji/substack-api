@@ -12,7 +12,9 @@ returns 404 saves the next person an afternoon.
 
 ## 1. Rate limits
 
-There are none published, and none discoverable at reasonable volume.
+There are none published. Different routes and traffic patterns behave
+differently, so a successful burst test must not be treated as proof that
+collection is unthrottled.
 
 Measured: 600 requests to `/api/v1/user/{handle}/public_profile`, in three
 fully-concurrent bursts of 200.
@@ -23,17 +25,16 @@ fully-concurrent bursts of 200.
 | B | 200 | 607 ms | 200 × HTTP 200 |
 | C | 200 | 468 ms | 200 × HTTP 200 |
 
-- No `429` responses.
+- No `429` responses in that specific profile-read burst.
 - No `Retry-After` header, ever.
 - No `X-RateLimit-*` headers of any kind.
 - No `cf-mitigated` header.
 - Response headers present: `server: cloudflare`, `x-served-by: Substack`,
   `cf-cache-status: DYNAMIC`, `cf-ray: …`.
 
-**The correct conclusion is not "rate limits are generous".** It is that rate
-limiting is not enforced via status codes. Unauthenticated reads are never
-*rejected*; enforcement is account-level and behavioural, and it applies to
-*writes*. See [§6](#6-why-there-are-no-write-endpoints).
+**The correct conclusion is not "rate limits are generous".** Later paginated
+collection produced real HTTP 429 responses. Treat throttling as route-, IP-,
+and traffic-pattern-dependent rather than assuming one global policy.
 
 ### 1a. The trap: silent degradation instead of 429
 
@@ -67,9 +68,11 @@ Root-host search is the only endpoint seen to do this. Publication-scoped
 endpoints (`archive`, `comments`, `recommendations`) and `profile/search` kept
 working normally throughout both episodes.
 
-This client defaults to a concurrency of 4. Cloudflare bot management can trip
-on sustained volume even without a published limit, and an IP-level block is
-annoying to unwind.
+This client therefore defaults to concurrency `1` and a `750 ms` minimum gap.
+HTTP 429, transient 5xx, and network failures receive up to four retries with
+exponential backoff. `Retry-After` accepts seconds or an HTTP date, is capped at
+60 seconds per retry, and establishes a shared cooldown for queued requests.
+The final failed attempt throws; callers do not retry forever.
 
 ### 1b. Pagination is route-specific
 
@@ -370,7 +373,8 @@ subscription overlap. That is the query the API actually supports.
 This project is read-only on purpose, and the reasoning is operational rather
 than decorative.
 
-Reads are anonymous, IP-scoped, and unthrottled. No account is attached.
+Reads are anonymous and IP-scoped by default, but can still be throttled. No
+account is attached unless the caller explicitly configures a cookie.
 
 Writes are the opposite. Automating subscribe / follow / like / comment means
 sending `substack.sid` — your account — at machine speed, to paths under

@@ -21,6 +21,25 @@ substack-api collect '/profiles/search?query=ai%20engineer' \
 
 The CLI returns a stable envelope containing `items`, `count`, `pagesFetched`, `exhausted`, and `continuation`. The same bounded behavior is available through typed client helpers for profile search, publication search, Notes feeds, archives, and category leaderboards.
 
+## Rate-limit safety
+
+<Table
+  id="rate-limit-controls"
+  density="compact"
+  columns={["Control", "Default", "Behavior"]}
+  rows={[
+    ["Concurrency", "1", "Serializes upstream reads unless the caller deliberately opts into parallelism"],
+    ["Request spacing", "750 ms", "Leaves a minimum gap between request starts during collection"],
+    ["Retry ceiling", "4 retries", "Stops with a typed error after five total failed attempts"],
+    ["Backoff", "1 s to 60 s", "Exponential delay with jitter; Retry-After seconds and HTTP dates are honored"],
+    ["Shared cooldown", "On HTTP 429", "Pauses later queued requests so another collector does not immediately refill the rate limit"]
+  ]}
+/>
+
+<Callout id="rate-limit-stop" tone="warning">
+  Retries are intentionally bounded. Reaching the final 429 stops the collection; immediately restarting the same command would defeat the cooldown and is not considered recovery.
+</Callout>
+
 ## Pagination contract
 
 <Table
@@ -126,12 +145,12 @@ The release is additive and versioned as `0.2.0`. New public helpers are exporte
   density="compact"
   columns={["Area", "Files", "Outcome"]}
   rows={[
-    ["Typed client", "src/client/resources/*.ts, src/index.ts", "New collectors, stronger deduplication, repeated-page and cursor guards, public option exports"],
+    ["Typed client", "src/client/http.ts, src/client/config.ts, src/client/resources/*.ts, src/index.ts", "New collectors plus conservative pacing, shared 429 cooldowns, Retry-After, and bounded retries"],
     ["CLI", "src/cli.ts, src/cli/collect.ts", "New collect command and stable collection envelope"],
     ["REST/OpenAPI", "src/server/routes/*.ts", "Pagination and collection guidance attached to the affected route descriptions"],
     ["Agent guidance", "skills/substack-api/SKILL.md", "Bounded collection and 100-prospect multi-query workflow"],
     ["Documentation", "README.md, docs/UPSTREAM.md, examples/*.ts", "Route matrix, caveats, examples, and current verification date"],
-    ["Regression tests", "tests/cli-collect.test.ts, tests/resources-pagination.test.ts", "Page, cursor, offset, retry, deduplication, bounds, and unsupported-route coverage"]
+    ["Regression tests", "tests/http.test.ts, tests/config.test.ts, tests/cli-collect.test.ts, tests/resources-pagination.test.ts", "Page, cursor, offset, Retry-After, shared cooldown, retry ceiling, deduplication, bounds, and unsupported-route coverage"]
   ]}
 />
 
@@ -140,7 +159,7 @@ The release is additive and versioned as `0.2.0`. New public helpers are exporte
 <Checklist
   id="pagination-verification"
   items={[
-    { id: "unit-tests", label: "Full Vitest suite passes: 4 files, 62 tests", checked: true },
+    { id: "unit-tests", label: "Full Vitest suite passes: 4 files, 67 tests", checked: true },
     { id: "typecheck", label: "TypeScript typecheck passes", checked: true },
     { id: "build", label: "Production package build passes", checked: true },
     { id: "openapi", label: "OpenAPI specification regenerates with 26 documented paths", checked: true },
@@ -149,6 +168,8 @@ The release is additive and versioned as `0.2.0`. New public helpers are exporte
     { id: "notes-smoke", label: "Live suggested Notes collection advances an opaque cursor", checked: true },
     { id: "leaderboard-smoke", label: "Live leaderboard collection traverses multiple pages", checked: true },
     { id: "unsupported-smoke", label: "Live reactor collection is rejected as unpaginated", checked: true },
+    { id: "paced-smoke", label: "Live profile collection returned 25 records across two paced requests", checked: true },
+    { id: "rate-limit-tests", label: "Retry-After, shared cooldown, abort, redirect retry, and retry ceiling tests pass", checked: true },
     { id: "primary-review", label: "Primary-agent review completed; repeated-page CLI gap fixed and covered", checked: true }
   ]}
 />

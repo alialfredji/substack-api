@@ -56,7 +56,12 @@ function scriptedFetch(sequence: Array<() => Response>) {
   };
 }
 
-const ENV_KEYS = ['SUBSTACK_COOKIE', 'SUBSTACK_VALIDATE', 'SUBSTACK_DEBUG'] as const;
+const ENV_KEYS = [
+  'SUBSTACK_COOKIE',
+  'SUBSTACK_VALIDATE',
+  'SUBSTACK_DEBUG',
+  'SUBSTACK_MIN_DELAY_MS',
+] as const;
 let saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -65,6 +70,9 @@ beforeEach(() => {
     saved[key] = process.env[key];
     delete process.env[key];
   }
+  // Production defaults are deliberately paced; unit tests use injected fetch
+  // and should not spend 750 ms between synthetic requests.
+  process.env['SUBSTACK_MIN_DELAY_MS'] = '0';
   // Validation warnings write to stderr; keep test output readable.
   vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 });
@@ -74,6 +82,7 @@ afterEach(() => {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
   }
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -227,6 +236,107 @@ describe('retries', () => {
     const http = new SubstackHttp({ fetchImpl: fetcher.impl, retries: 2 });
 
     await expect(http.request('/api/v1/categories')).resolves.toEqual({ ok: true });
+    expect(fetcher.count).toBe(2);
+  });
+
+  it('honours an HTTP-date Retry-After header', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-20T12:00:00.000Z'));
+    const fetcher = scriptedFetch([
+      () =>
+        jsonResponse(
+          { error: 'slow down' },
+          429,
+          { 'retry-after': 'Thu, 20 Aug 2026 12:00:02 GMT' },
+        ),
+      () => jsonResponse({ ok: true }),
+    ]);
+    const http = new SubstackHttp({ fetchImpl: fetcher.impl, retries: 1 });
+
+    const result = http.request('/api/v1/categories');
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fetcher.count).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual({ ok: true });
+    vi.useRealTimers();
+  });
+
+  it('shares a 429 cooldown with later requests', async () => {
+    vi.useFakeTimers();
+    let releaseCooldown: (() => void) | undefined;
+    const cooldownStarted = new Promise<void>((resolve) => {
+      releaseCooldown = resolve;
+    });
+    vi.mocked(process.stderr.write).mockImplementation((chunk) => {
+      if (String(chunk).includes('retry 1/1')) releaseCooldown?.();
+      return true;
+    });
+    let firstCall = true;
+    let callCount = 0;
+    const impl = (async () => {
+      callCount += 1;
+      if (firstCall) {
+        firstCall = false;
+        return jsonResponse({ error: 'slow down' }, 429, { 'retry-after': '2' });
+      }
+      return jsonResponse({ ok: true });
+    }) as unknown as typeof fetch;
+    const http = new SubstackHttp({
+      fetchImpl: impl,
+      concurrency: 2,
+      minDelayMs: 0,
+      retries: 1,
+      debug: true,
+    });
+
+    const first = http.request('/api/v1/first');
+    await cooldownStarted;
+    const second = http.request('/api/v1/second');
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(callCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(Promise.all([first, second])).resolves.toEqual([{ ok: true }, { ok: true }]);
+    expect(callCount).toBe(3);
+    vi.useRealTimers();
+  });
+
+  it('stops after the configured 429 retry ceiling', async () => {
+    const fetcher = scriptedFetch([
+      () => jsonResponse({ error: 'slow down' }, 429, { 'retry-after': '0' }),
+    ]);
+    const http = new SubstackHttp({ fetchImpl: fetcher.impl, retries: 3 });
+
+    const error = await http.request('/api/v1/categories').catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(SubstackHttpError);
+    expect((error as SubstackHttpError).isRateLimited).toBe(true);
+    expect(fetcher.count).toBe(4);
+  });
+
+  it('lets the caller abort a long Retry-After wait', async () => {
+    const fetcher = scriptedFetch([
+      () => jsonResponse({ error: 'slow down' }, 429, { 'retry-after': '60' }),
+    ]);
+    const http = new SubstackHttp({ fetchImpl: fetcher.impl, retries: 4 });
+    const controller = new AbortController();
+
+    const result = http.request('/api/v1/categories', { signal: controller.signal });
+    while (fetcher.count === 0) await Promise.resolve();
+    controller.abort(new Error('collection stopped'));
+
+    await expect(result).rejects.toThrow('collection stopped');
+    expect(fetcher.count).toBe(1);
+  });
+
+  it('retries rate-limited redirect probes too', async () => {
+    const fetcher = scriptedFetch([
+      () => jsonResponse({ error: 'slow down' }, 429, { 'retry-after': '0' }),
+      () => new Response('', { status: 301, headers: { location: '/@somebody' } }),
+    ]);
+    const http = new SubstackHttp({ fetchImpl: fetcher.impl, retries: 1 });
+
+    await expect(http.resolveRedirect('/profile/1')).resolves.toBe('/@somebody');
     expect(fetcher.count).toBe(2);
   });
 

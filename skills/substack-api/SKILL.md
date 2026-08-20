@@ -45,6 +45,11 @@ Use the bundled launcher, resolved relative to this `SKILL.md`, to discover and 
    `continuation` contains `{ parameter, value }` for resuming the route.
    Unpaginated routes are rejected.
 
+   Requests are politely paced by default. HTTP 429, transient 5xx, and network
+   errors use bounded exponential backoff; `Retry-After` pauses queued requests
+   too. If the retry ceiling is reached, stop and report the error rather than
+   immediately restarting the same collection.
+
 5. Parse the returned JSON and present only the fields or conclusions relevant
    to the user's request.
 
@@ -83,8 +88,9 @@ All routes work anonymously. Set `SUBSTACK_COOKIE` in the environment only when 
 - Treat the API as unofficial, read-only, and subject to upstream drift.
 - Do not claim that an empty publication search proves there are no matches;
   this endpoint can transiently return empty results with no `more` field when
-  throttled. Retry once after a short pause, then report the search as
-  inconclusive if it remains empty.
+  throttled. The collector retries that degraded response once in addition to
+  transport-level HTTP retries, then reports the search as inconclusive if it
+  remains empty.
 - Do not promise follower or following enumeration; Substack exposes no such public endpoint.
 - Do not assume a requested collection `limit` controls upstream page size. It
   caps the returned aggregate. Profile search, publication search, and
@@ -94,7 +100,9 @@ All routes work anonymously. Set `SUBSTACK_COOKIE` in the environment only when 
   overlap.
 - Do not assume reaction counts equal the number of returned reactors.
 - Treat empty gated comment threads as inconclusive rather than proof that no comments exist.
-- Keep request volume polite and avoid unbounded enumeration.
+- Keep request volume polite, retain the conservative pacing defaults, and
+  avoid unbounded enumeration. Do not bypass a final 429 by immediately
+  restarting the command.
 
 ## Runtime
 
