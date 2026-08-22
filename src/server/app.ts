@@ -94,6 +94,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.decorate('substack', createSubstackClient(options.client ?? {}));
   app.decorateRequest('substackCookie', undefined);
+  app.addHook('onClose', async () => app.substack.close());
 
   // Lift the per-request cookie override off the header exactly once.
   app.addHook('onRequest', async (request) => {

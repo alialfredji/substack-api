@@ -6,7 +6,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { describeRoute, requestSchema, responseSchema, commonErrorResponses } from '../openapi.js';
-import { ProfileSchema, ProfileSearchQuerySchema, ProfileSearchResultSchema, SubscriptionSchema } from '../../schemas/profile.js';
+import {
+  ProfileSchema,
+  ProfileSearchQuerySchema,
+  ProfileSearchResultSchema,
+  SubscriberListUserSchema,
+  SubscriptionSchema,
+} from '../../schemas/profile.js';
 import { PublicationSchema } from '../../schemas/common.js';
 
 const HandleParamsSchema = z.object({
@@ -104,6 +110,78 @@ export default async function profileRoutes(app: FastifyInstance): Promise<void>
     async (request) => {
       const { handle } = request.params as { handle: string };
       return app.substack.profiles.getSubscriptions(handle, { cookie: request.substackCookie });
+    },
+  );
+
+  app.get(
+    '/profiles/:handle/subscribers',
+    {
+      schema: {
+        tags: ['profiles'],
+        summary: "A profile's subscribers",
+        description: describeRoute(
+          "Returns the people who subscribe to a profile's publication. Enumeration works anonymously; " +
+            'a cookie only resolves viewer-relative fields and grouping. The handle costs one preliminary ' +
+            'public-profile lookup because the upstream list endpoint requires a numeric user id.',
+          [
+            {
+              title: 'List subscribers',
+              curl: 'curl -s http://127.0.0.1:3000/profiles/fredriktunvall/subscribers | jq',
+              ts: `const users = await substack.profiles.getSubscribers('fredriktunvall');\nconsole.log(users.map((user) => user.handle));`,
+              upstream: 'GET https://substack.com/api/v1/user/{userId}/subscriber-lists?lists=subscribers',
+            },
+          ],
+          'The upstream response is unpaginated and grouped. This convenience route flattens the groups and ' +
+            'deduplicates users by numeric id; use `getSubscriberLists()` in the typed client to preserve groups. ' +
+            'The gateway handles Substack\'s browser-fingerprint check transparently.',
+        ),
+        params: requestSchema(HandleParamsSchema),
+        security: [{ substackCookie: [] }],
+        response: {
+          200: { description: 'Flat, deduplicated array of subscribers.', ...responseSchema(z.array(SubscriberListUserSchema)) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const { handle } = request.params as { handle: string };
+      return app.substack.profiles.getSubscribers(handle, { cookie: request.substackCookie });
+    },
+  );
+
+  app.get(
+    '/profiles/:handle/followers',
+    {
+      schema: {
+        tags: ['profiles'],
+        summary: "A profile's followers",
+        description: describeRoute(
+          'Returns the people who follow a profile. Enumeration works anonymously; a cookie only resolves ' +
+            'viewer-relative fields. The handle costs one preliminary public-profile lookup because the ' +
+            'upstream list endpoint requires a numeric user id.',
+          [
+            {
+              title: 'List followers',
+              curl: 'curl -s http://127.0.0.1:3000/profiles/fredriktunvall/followers | jq',
+              ts: `const users = await substack.profiles.getFollowers('fredriktunvall');\nconsole.log(users.map((user) => user.handle));`,
+              upstream: 'GET https://substack.com/api/v1/user/{userId}/subscriber-lists?lists=followers',
+            },
+          ],
+          'The upstream response is unpaginated and grouped. This convenience route flattens the groups and ' +
+            'deduplicates users by numeric id; use `getSubscriberLists()` in the typed client to preserve groups. ' +
+            'The gateway handles Substack\'s browser-fingerprint check transparently.',
+        ),
+        params: requestSchema(HandleParamsSchema),
+        security: [{ substackCookie: [] }],
+        response: {
+          200: { description: 'Flat, deduplicated array of followers.', ...responseSchema(z.array(SubscriberListUserSchema)) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const { handle } = request.params as { handle: string };
+      return app.substack.profiles.getFollowers(handle, { cookie: request.substackCookie });
     },
   );
 

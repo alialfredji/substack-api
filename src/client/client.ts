@@ -44,6 +44,11 @@ export class SubstackClient {
   get authenticated(): boolean {
     return this.http.hasCookie;
   }
+
+  /** Release optional native transport resources used by protected reads. */
+  async close(): Promise<void> {
+    await this.http.close();
+  }
 }
 
 /** Create a client. All configuration is optional; see {@link SubstackClientConfig}. */

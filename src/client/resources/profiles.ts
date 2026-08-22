@@ -14,8 +14,12 @@ import type { CallOptions, PaginateOptions } from '../types.js';
 import {
   ProfileSchema,
   ProfileSearchResultSchema,
+  SubscriberListsResponseSchema,
   type Profile,
   type ProfileSearchResult,
+  type SubscriberListKind,
+  type SubscriberListsResponse,
+  type SubscriberListUser,
   type Subscription,
 } from '../../schemas/profile.js';
 import type { Publication } from '../../schemas/common.js';
@@ -196,6 +200,60 @@ export class ProfilesResource {
   async getSubscriptions(handle: string, opts?: CallOptions): Promise<Subscription[]> {
     const profile = await this.getByHandle(handle, opts);
     return profile.subscriptions ?? [];
+  }
+
+  /**
+   * Fetch a profile's public subscriber and/or follower lists.
+   *
+   * The upstream endpoint is keyed by numeric user id. Passing a numeric id is
+   * therefore one request; passing a handle first calls `getByHandle()` to
+   * resolve its id. The endpoint is unpaginated and preserves Substack's
+   * viewer-dependent display groups in the response. Substack currently puts
+   * this route behind a Cloudflare browser challenge for some direct Node
+   * requests; the default transport handles that transparently with a lazily
+   * bootstrapped browser-fingerprinted session.
+   */
+  async getSubscriberLists(
+    profile: number | string,
+    lists: SubscriberListKind[] = ['subscribers', 'followers'],
+    opts?: CallOptions,
+  ): Promise<SubscriberListsResponse> {
+    const uniqueLists = [...new Set(lists)];
+    if (uniqueLists.length === 0) {
+      throw new Error('getSubscriberLists requires at least one list.');
+    }
+
+    const userId = typeof profile === 'number' ? profile : (await this.getByHandle(profile, opts)).id;
+    return this.http.request(`/api/v1/user/${userId}/subscriber-lists`, {
+      query: { lists: uniqueLists.join(',') },
+      schema: SubscriberListsResponseSchema,
+      cookie: opts?.cookie,
+      signal: opts?.signal,
+    });
+  }
+
+  /** Return a deduped, flat list of a profile's subscribers. */
+  async getSubscribers(profile: number | string, opts?: CallOptions): Promise<SubscriberListUser[]> {
+    return this.getSubscriberListUsers(profile, 'subscribers', opts);
+  }
+
+  /** Return a deduped, flat list of a profile's followers. */
+  async getFollowers(profile: number | string, opts?: CallOptions): Promise<SubscriberListUser[]> {
+    return this.getSubscriberListUsers(profile, 'followers', opts);
+  }
+
+  private async getSubscriberListUsers(
+    profile: number | string,
+    kind: SubscriberListKind,
+    opts?: CallOptions,
+  ): Promise<SubscriberListUser[]> {
+    const response = await this.getSubscriberLists(profile, [kind], opts);
+    const list = response.subscriberLists.find(({ id }) => id === kind);
+    const byId = new Map<number, SubscriberListUser>();
+    for (const group of list?.groups ?? []) {
+      for (const user of group.users) byId.set(user.id, user);
+    }
+    return [...byId.values()];
   }
 
   /**

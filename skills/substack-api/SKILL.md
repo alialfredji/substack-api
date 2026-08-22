@@ -1,6 +1,6 @@
 ---
 name: substack-api
-description: Query Substack's public read-only API through a scriptable JSON CLI. Use when an agent needs Substack profiles, profile searches, public subscription graphs, note feeds, note reactors, publications, post archives, comments, recommendations, related publications, categories, or leaderboards; when it needs to discover or inspect the available Substack API routes; or when it needs to combine these calls into research and targeting workflows.
+description: Query Substack's public read-only API through a scriptable JSON CLI. Use when an agent needs Substack profiles, profile searches, public subscriber or follower lists, public subscription graphs, note feeds, note reactors, publications, post archives, comments, recommendations, related publications, categories, or leaderboards; when it needs to discover or inspect the available Substack API routes; or when it needs to combine these calls into research and targeting workflows.
 ---
 
 # Substack API
@@ -65,7 +65,7 @@ Substack has no uniform pagination contract:
 | `page` | Profile search, publication search, category leaderboards |
 | `nextCursor` | Profile Notes, suggested Notes |
 | `offset` + `limit` | Publication archives |
-| None known | Note reactors, comments, recommendations, categories |
+| None known | Subscriber/follower lists, note reactors, comments, recommendations, categories |
 
 Never invent pagination parameters for an unpaginated route. Stop if a
 continuation value or page repeats, even when the upstream response claims more
@@ -79,7 +79,7 @@ report the number actually found instead of claiming exhaustive coverage.
 
 ## Authentication
 
-All routes work anonymously. Set `SUBSTACK_COOKIE` in the environment only when viewer-relative fields such as subscription or following state must be accurate. Treat it as a password: never print it, include it in a command argument, commit it, or expose it in the response.
+All route data is public. The client transparently uses its browser-compatible transport for subscriber/follower lists, which Cloudflare challenges when called by a cold Node client. Set `SUBSTACK_COOKIE` in the environment only when viewer-relative fields such as subscription or following state must be accurate. Treat it as a password: never print it, include it in a command argument, commit it, or expose it in the response.
 
 `unsubscribedOnly=true` requires authentication because anonymous reactor records report subscription state as false.
 
@@ -91,7 +91,7 @@ All routes work anonymously. Set `SUBSTACK_COOKIE` in the environment only when 
   throttled. The collector retries that degraded response once in addition to
   transport-level HTTP retries, then reports the search as inconclusive if it
   remains empty.
-- Do not promise follower or following enumeration; Substack exposes no such public endpoint.
+- Subscriber and follower enumeration is public and unpaginated through the profile routes. The bundled transport handles Substack's browser-fingerprint check automatically. Do not confuse followers (people following a profile) with following (profiles the viewer follows); following enumeration is not exposed here.
 - Do not assume a requested collection `limit` controls upstream page size. It
   caps the returned aggregate. Profile search, publication search, and
   leaderboards use upstream-fixed page sizes; archives honor their page

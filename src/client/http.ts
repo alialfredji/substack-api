@@ -113,6 +113,8 @@ function isRetryableStatus(status: number): boolean {
 export class SubstackHttp {
   readonly config: ResolvedConfig;
   private readonly gate: Semaphore;
+  /** Lazily-created browser-fingerprinted session for Cloudflare-protected list reads. */
+  private protectedSessionPromise: Promise<import('wreq-js').Session> | null = null;
   private lastRequestStart = 0;
   /** A 429 pauses later queued requests too, rather than only the request that hit it. */
   private cooldownUntil = 0;
@@ -127,6 +129,11 @@ export class SubstackHttp {
   /** True when a session cookie is configured. Handy for conditional logic. */
   get hasCookie(): boolean {
     return this.config.cookie !== null;
+  }
+
+  /** Release the optional native transport session. Safe to call more than once. */
+  async close(): Promise<void> {
+    await this.resetProtectedSession();
   }
 
   /**
@@ -352,22 +359,27 @@ export class SubstackHttp {
     const onCallerAbort = (): void => controller.abort(options.signal?.reason);
     options.signal?.addEventListener('abort', onCallerAbort, { once: true });
 
-    const headers: Record<string, string> = {
-      accept: 'application/json, text/plain, */*',
-      'user-agent': userAgent,
-    };
+    const protectedRequest = this.shouldUseProtectedTransport(url);
+    const headers: Record<string, string> = { accept: 'application/json, text/plain, */*' };
+    // The protected transport supplies a User-Agent matching its TLS/HTTP2
+    // browser profile. Overriding it with the normal Node transport UA would
+    // create the exact fingerprint mismatch Cloudflare is checking for.
+    if (!protectedRequest) headers['user-agent'] = userAgent;
     const cookie = this.resolveCookie(options);
     if (cookie) headers['cookie'] = cookie;
     if (options.body !== undefined) headers['content-type'] = 'application/json';
 
     try {
-      return await fetchImpl(url, {
+      const init: RequestInit = {
         method: options.method ?? 'GET',
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: controller.signal,
         redirect: options.redirect ?? 'follow',
-      });
+      };
+      return protectedRequest
+        ? await this.fetchWithProtectedTransport(url, init)
+        : await fetchImpl(url, init);
     } catch (error) {
       // An abort we caused is a timeout; an abort the caller caused propagates.
       if (controller.signal.aborted && !options.signal?.aborted) {
@@ -377,6 +389,86 @@ export class SubstackHttp {
     } finally {
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', onCallerAbort);
+    }
+  }
+
+  /**
+   * Substack browser pages can read subscriber lists, while a cold Node TLS
+   * client is challenged. A browser-fingerprinted session that first visits
+   * the root page receives the ordinary edge cookies and can then make the
+   * exact same JSON request. Keep this special case out of every other route.
+   */
+  private shouldUseProtectedTransport(url: string): boolean {
+    if (this.config.fetchImpl !== globalThis.fetch) return false;
+    const parsed = new URL(url);
+    return (
+      parsed.hostname === 'substack.com' &&
+      /^\/api\/v1\/user\/\d+\/subscriber-lists$/.test(parsed.pathname)
+    );
+  }
+
+  private async fetchWithProtectedTransport(url: string, init: RequestInit): Promise<Response> {
+    let session = await this.getProtectedSession(init.signal);
+    let response = await session.fetch(url, init);
+
+    // Clearance can expire in a long-running gateway. Re-bootstrap once, then
+    // let the normal HTTP error path report any persistent challenge.
+    if (response.headers.get('cf-mitigated') === 'challenge') {
+      await response.arrayBuffer();
+      await this.resetProtectedSession(session);
+      session = await this.getProtectedSession(init.signal);
+      response = await session.fetch(url, init);
+    }
+
+    return response as unknown as Response;
+  }
+
+  private async getProtectedSession(signal?: AbortSignal | null): Promise<import('wreq-js').Session> {
+    if (!this.protectedSessionPromise) {
+      const pending = this.createProtectedSession(signal);
+      this.protectedSessionPromise = pending;
+      void pending.catch(() => {
+        if (this.protectedSessionPromise === pending) this.protectedSessionPromise = null;
+      });
+    }
+    return this.protectedSessionPromise;
+  }
+
+  private async createProtectedSession(signal?: AbortSignal | null): Promise<import('wreq-js').Session> {
+    const { createSession } = await import('wreq-js');
+    const session = await createSession({ browser: 'chrome', timeout: this.config.timeoutMs });
+    try {
+      const response = await session.fetch(`${this.config.baseUrl}/`, { signal });
+      const body = await response.text();
+      if (!response.ok) {
+        throw new SubstackHttpError(
+          response.status,
+          response.statusText,
+          `${this.config.baseUrl}/`,
+          previewBody(body),
+          looksLikeHtml(body, response.headers.get('content-type')),
+        );
+      }
+      return session;
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
+  }
+
+  private async resetProtectedSession(expected?: import('wreq-js').Session): Promise<void> {
+    const pending = this.protectedSessionPromise;
+    if (!pending) return;
+    try {
+      const session = await pending;
+      // Another concurrent request may already have replaced the challenged
+      // session. Never let a stale response close that newer session.
+      if (expected && session !== expected) return;
+      if (this.protectedSessionPromise === pending) this.protectedSessionPromise = null;
+      if (!session.closed) await session.close();
+    } catch {
+      // Failed session creation already cleans up its native resources.
+      if (this.protectedSessionPromise === pending) this.protectedSessionPromise = null;
     }
   }
 

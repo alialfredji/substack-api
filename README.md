@@ -7,7 +7,7 @@ Built for finding people and publications — profile search, subscription graph
 note engagement, category leaderboards — so that a tool can rank who is worth
 engaging with.
 
-- **26 routes**, every one verified against the live API
+- **28 routes**, every one verified against the live API
 - **Zero write endpoints**, on purpose — see [Why read-only](#why-read-only)
 - Full endpoint research, including 22 confirmed dead ends, in
   [`docs/UPSTREAM.md`](docs/UPSTREAM.md)
@@ -106,6 +106,11 @@ Get it from DevTools → Application → Cookies → `substack.com` → `substac
 **Treat it like a password** — it is full account access, and `.env` is gitignored
 for that reason.
 
+The subscriber/follower endpoint is protected by a browser-fingerprint check.
+The client handles it transparently: the first such call lazily bootstraps a
+browser-compatible HTTP session, and later calls reuse it. Public methods,
+Swagger routes, and cookie semantics are unchanged.
+
 One deliberate hard failure: `unsubscribedReactors()` — "who liked this but has
 not subscribed" — **throws `SubstackAuthRequiredError` without a cookie** rather
 than returning a list. Anonymously every reactor reads `is_subscribed: false`, so
@@ -140,6 +145,9 @@ Substack's fixed or variable upstream page size.
 | `search({ query, page })` | Returns full profile objects, `subscriptions[]` included |
 | `searchAll({ query, limit, maxPages })` | Bounded page walk, deduped by profile id. Page size is fixed at 20 upstream |
 | `getSubscriptions(handle)` | Just the subscription list |
+| `getSubscriberLists(handleOrId, lists)` | Grouped subscribers/followers; numeric id is one request, handle is two |
+| `getSubscribers(handleOrId)` | Flat, deduped public subscriber list |
+| `getFollowers(handleOrId)` | Flat, deduped public follower list |
 | `subscriptionOverlap(a, b)` | Shared publications + count + Jaccard score |
 
 ### `substack.notes`
@@ -189,6 +197,8 @@ All `GET`. Browse and execute them at `/docs`.
 | `/health`, `/config`, `/openapi.json` | Meta. `/config` shows whether a cookie was detected |
 | `/profiles/{handle}` | Profile with subscriptions |
 | `/profiles/{handle}/subscriptions` | Subscription list only |
+| `/profiles/{handle}/subscribers` | Public subscriber list |
+| `/profiles/{handle}/followers` | Public follower list |
 | `/profiles/by-id/{userId}` | Profile by numeric id |
 | `/profiles/by-id/{userId}/handle` | Just the id → handle mapping (one request) |
 | `/profiles/search?query=&page=` | People search |

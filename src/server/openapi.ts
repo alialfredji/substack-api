@@ -132,8 +132,8 @@ export const OPENAPI_TAGS = [
   {
     name: 'profiles',
     description:
-      'People. Fetch a profile with its public `subscriptions[]` array, or search profiles by keyword. ' +
-      'The search endpoint returns full profile objects, so one call gives you both a person and their subscription graph.',
+      'People. Fetch profiles, their public subscriber/follower lists, or search by keyword. ' +
+      'Profile objects include public `subscriptions[]`, so one call gives you both a person and their subscription graph.',
   },
   {
     name: 'notes',

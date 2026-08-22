@@ -87,7 +87,7 @@ routes fall into four groups:
 | Cursor | `reader/feed/profile/{userId}` | Pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
 | Cursor | `reader/feed` | Pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
 | Offset | Publication-scoped `archive` | `limit` is honored; advance `offset` by the number returned | Empty or short batch |
-| Unpaginated | Reactors, comments, recommendations, categories | `page`, `offset`, and/or `limit` do not expose another batch | Single response only |
+| Unpaginated | Subscriber/follower lists, reactors, comments, recommendations, categories | `page`, `offset`, and/or `limit` do not expose another batch | Single response only |
 
 Collectors must also stop if a page, cursor, or batch repeats. That guard is
 important for an undocumented API where a nominal continuation field can drift
@@ -146,6 +146,21 @@ All are `GET`. Base is `https://substack.com` unless the path is marked
 |---|---|---|
 | `/api/v1/user/{handle}/public_profile` | profile object | Includes `subscriptions[]` — who this person subscribes to. |
 | `/api/v1/profile/search?query={q}&page={n}` | `{ results, more }` | **Both params required.** Results are full profile objects, `subscriptions[]` included. |
+| `/api/v1/user/{userId}/subscriber-lists?lists=subscribers,followers` | `{ subscriberLists }` | Public, unpaginated relationship lists. `lists` accepts either value or both comma-separated. |
+
+`subscriber-lists` is keyed by the numeric profile id, not the handle. Each
+requested list contains `groups[]`, and each group contains `users[]`. A cookie
+is not required to enumerate either list. With a cookie, subscriber grouping can
+be viewer-dependent (for example, a separate `People you follow` group), and
+the users' `is_subscribed` / `is_following` fields become viewer-relative.
+
+Transport caveat verified on 2026-08-22: the same anonymous request returned
+`200` from Substack's page context, while direct Node 25 and curl requests were
+met with Cloudflare's HTML `403` challenge. This is not an authorization error,
+and copying browser cookies did not help. The client handles this route with a
+pinned browser-fingerprinted HTTP session: it loads `https://substack.com/` once
+to establish the edge session, then makes the unchanged JSON request. If a
+long-running session is challenged later, it re-bootstraps once and retries.
 
 `public_profile` verified top-level keys:
 

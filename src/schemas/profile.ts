@@ -40,6 +40,65 @@ export const SubscriptionSchema = z
   .describe('A single publication subscription entry on a profile.');
 export type Subscription = z.infer<typeof SubscriptionSchema>;
 
+/** The two public relationship lists exposed on a profile page. */
+export const SubscriberListKindSchema = z.enum(['subscribers', 'followers']);
+export type SubscriberListKind = z.infer<typeof SubscriberListKindSchema>;
+
+/**
+ * A person returned by `/api/v1/user/{userId}/subscriber-lists`.
+ *
+ * This is close to a note reactor, but additionally carries the profile
+ * `handle` and a few profile metadata fields. The two relationship booleans
+ * are viewer-relative; enumeration itself works anonymously.
+ */
+export const SubscriberListUserSchema = z
+  .looseObject({
+    id: z.number(),
+    name: z.string(),
+    handle: z.string(),
+    previous_name: MaybeString,
+    photo_url: MaybeString,
+    bio: MaybeString,
+    profile_set_up_at: MaybeString,
+    reader_installed_at: MaybeString,
+    primary_publication: PublicationSchema.nullish(),
+    bestseller_tier: MaybeNumber,
+    status: UserStatusSchema.nullish(),
+    /** Viewer-relative; anonymous calls return `false`. */
+    is_subscribed: MaybeBoolean,
+    /** Viewer-relative; anonymous calls return `false`. */
+    is_following: MaybeBoolean,
+    /** Free-text "writes {publication name}" string shown under the name. */
+    writes: MaybeString,
+  })
+  .describe('A person in a profile subscriber or follower list.');
+export type SubscriberListUser = z.infer<typeof SubscriberListUserSchema>;
+
+export const SubscriberListGroupSchema = z
+  .looseObject({
+    /** Viewer-dependent grouping label; `null` for the follower list. */
+    name: MaybeString,
+    users: z.array(SubscriberListUserSchema),
+  })
+  .describe('One display group within a subscriber or follower list.');
+export type SubscriberListGroup = z.infer<typeof SubscriberListGroupSchema>;
+
+export const SubscriberListSchema = z
+  .looseObject({
+    id: SubscriberListKindSchema,
+    name: z.string(),
+    groups: z.array(SubscriberListGroupSchema),
+  })
+  .describe('One requested subscriber or follower list, preserving Substack display groups.');
+export type SubscriberList = z.infer<typeof SubscriberListSchema>;
+
+export const SubscriberListsResponseSchema = z
+  .looseObject({
+    subscriberLists: z.array(SubscriberListSchema),
+  })
+  .describe('Grouped subscriber and/or follower lists for a profile.');
+export type SubscriberListsResponse = z.infer<typeof SubscriberListsResponseSchema>;
+
 /**
  * A Substack person ("profile"). Returned by both `GET /user/{handle}/public_profile`
  * and as each entry of `GET /profile/search`'s `results[]` — identical shape in
