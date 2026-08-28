@@ -40,8 +40,8 @@ export const SubscriptionSchema = z
   .describe('A single publication subscription entry on a profile.');
 export type Subscription = z.infer<typeof SubscriptionSchema>;
 
-/** The two public relationship lists exposed on a profile page. */
-export const SubscriberListKindSchema = z.enum(['subscribers', 'followers']);
+/** The three public relationship lists exposed on a profile page. */
+export const SubscriberListKindSchema = z.enum(['subscribers', 'followers', 'following']);
 export type SubscriberListKind = z.infer<typeof SubscriberListKindSchema>;
 
 /**
@@ -71,16 +71,16 @@ export const SubscriberListUserSchema = z
     /** Free-text "writes {publication name}" string shown under the name. */
     writes: MaybeString,
   })
-  .describe('A person in a profile subscriber or follower list.');
+  .describe('A person in a profile subscriber, follower, or following list.');
 export type SubscriberListUser = z.infer<typeof SubscriberListUserSchema>;
 
 export const SubscriberListGroupSchema = z
   .looseObject({
-    /** Viewer-dependent grouping label; `null` for the follower list. */
+    /** Viewer-dependent grouping label; `null` for follower and following lists. */
     name: MaybeString,
     users: z.array(SubscriberListUserSchema),
   })
-  .describe('One display group within a subscriber or follower list.');
+  .describe('One display group within a subscriber, follower, or following list.');
 export type SubscriberListGroup = z.infer<typeof SubscriberListGroupSchema>;
 
 export const SubscriberListSchema = z
@@ -89,14 +89,14 @@ export const SubscriberListSchema = z
     name: z.string(),
     groups: z.array(SubscriberListGroupSchema),
   })
-  .describe('One requested subscriber or follower list, preserving Substack display groups.');
+  .describe('One requested relationship list, preserving Substack display groups.');
 export type SubscriberList = z.infer<typeof SubscriberListSchema>;
 
 export const SubscriberListsResponseSchema = z
   .looseObject({
     subscriberLists: z.array(SubscriberListSchema),
   })
-  .describe('Grouped subscriber and/or follower lists for a profile.');
+  .describe('Grouped subscriber, follower, and/or following lists for a profile.');
 export type SubscriberListsResponse = z.infer<typeof SubscriberListsResponseSchema>;
 
 /**

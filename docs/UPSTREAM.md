@@ -87,7 +87,7 @@ routes fall into four groups:
 | Cursor | `reader/feed/profile/{userId}` | Pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
 | Cursor | `reader/feed` | Pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
 | Offset | Publication-scoped `archive` | `limit` is honored; advance `offset` by the number returned | Empty or short batch |
-| Unpaginated | Subscriber/follower lists, reactors, comments, recommendations, categories | `page`, `offset`, and/or `limit` do not expose another batch | Single response only |
+| Unpaginated | Subscriber/follower/following lists, reactors, comments, recommendations, categories | `page`, `offset`, and/or `limit` do not expose another batch | Single response only |
 
 Collectors must also stop if a page, cursor, or batch repeats. That guard is
 important for an undocumented API where a nominal continuation field can drift
@@ -146,13 +146,19 @@ All are `GET`. Base is `https://substack.com` unless the path is marked
 |---|---|---|
 | `/api/v1/user/{handle}/public_profile` | profile object | Includes `subscriptions[]` — who this person subscribes to. |
 | `/api/v1/profile/search?query={q}&page={n}` | `{ results, more }` | **Both params required.** Results are full profile objects, `subscriptions[]` included. |
-| `/api/v1/user/{userId}/subscriber-lists?lists=subscribers,followers` | `{ subscriberLists }` | Public, unpaginated relationship lists. `lists` accepts either value or both comma-separated. |
+| `/api/v1/user/{userId}/subscriber-lists?lists=subscribers,followers,following` | `{ subscriberLists }` | Public, unpaginated relationship lists. `lists` accepts any value or comma-separated combination. |
 
 `subscriber-lists` is keyed by the numeric profile id, not the handle. Each
 requested list contains `groups[]`, and each group contains `users[]`. A cookie
-is not required to enumerate either list. With a cookie, subscriber grouping can
+is not required to enumerate any list. With a cookie, subscriber grouping can
 be viewer-dependent (for example, a separate `People you follow` group), and
 the users' `is_subscribed` / `is_following` fields become viewer-relative.
+
+The `following` value was verified on 2026-08-28 from the live profile page and
+an anonymous client request. It returned 200 unique users. Adding `page=1`,
+`offset=200`, or `limit=20` returned the identical 200 ids in the identical
+order, and the response exposes no continuation token. Treat 200 as an upstream
+cap, not proof that the profile follows only 200 users.
 
 Transport caveat verified on 2026-08-22: the same anonymous request returned
 `200` from Substack's page context, while direct Node 25 and curl requests were
@@ -268,8 +274,8 @@ error. Recorded so nobody re-probes them.
 
 Two structural facts follow from this list:
 
-1. **There is no public follower or following enumeration.** You cannot list who
-   follows an account.
+1. **The obvious direct paths do not exist.** Relationship enumeration is served
+   through `/api/v1/user/{userId}/subscriber-lists` instead.
 2. **Recommendations are only served from a publication's own subdomain.** The
    `substack.com`-hosted variant does not exist.
 
@@ -371,17 +377,17 @@ feed is the only source.
 - An invalid numeric category id returns `200` with `{publications: [], more:
   false}` and no `title` key — not a 404.
 
-## 5. The thing people expect and cannot have
+## 5. Relationship-list limits
 
-**Subscriber lists are not exposed.** Not by the API, not by the UI, not at all.
-That list is the asset Substack sells to writers. You can read counts
-(`subscriberCount`, `rough_num_free_subscribers_int`) and nothing more.
+The `subscriber-lists` endpoint exposes subscribers, followers, and followed
+profiles, but it is not a general-purpose graph crawler. The response has no
+continuation token, pagination parameters have no effect, and `following` is
+capped at 200 users.
 
-The useful inversion: `subscriptions[]` on a *profile* is public. So while you
-cannot ask *"who subscribes to publication X"*, you can ask, for any given
-person, *"what does this person subscribe to"* — and get the full visible list.
-Harvest candidates from public engagement surfaces, then score each by
-subscription overlap. That is the query the API actually supports.
+The complementary `subscriptions[]` field on every public profile remains useful
+for discovery: it answers *"what does this person subscribe to?"* without another
+request. Harvest candidates from public engagement surfaces, then score each by
+subscription overlap when a fixed relationship list is not enough.
 
 ## 6. Why there are no write endpoints
 

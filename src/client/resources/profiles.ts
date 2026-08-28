@@ -203,7 +203,7 @@ export class ProfilesResource {
   }
 
   /**
-   * Fetch a profile's public subscriber and/or follower lists.
+   * Fetch one or more of a profile's public subscriber, follower, and following lists.
    *
    * The upstream endpoint is keyed by numeric user id. Passing a numeric id is
    * therefore one request; passing a handle first calls `getByHandle()` to
@@ -240,6 +240,16 @@ export class ProfilesResource {
   /** Return a deduped, flat list of a profile's followers. */
   async getFollowers(profile: number | string, opts?: CallOptions): Promise<SubscriberListUser[]> {
     return this.getSubscriberListUsers(profile, 'followers', opts);
+  }
+
+  /**
+   * Return a deduped, flat list of profiles this person follows.
+   *
+   * The upstream response is capped at 200 users and exposes no working
+   * pagination: `page`, `offset`, and `limit` all return the same first batch.
+   */
+  async getFollowing(profile: number | string, opts?: CallOptions): Promise<SubscriberListUser[]> {
+    return this.getSubscriberListUsers(profile, 'following', opts);
   }
 
   private async getSubscriberListUsers(

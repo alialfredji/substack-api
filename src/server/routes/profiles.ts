@@ -186,6 +186,43 @@ export default async function profileRoutes(app: FastifyInstance): Promise<void>
   );
 
   app.get(
+    '/profiles/:handle/following',
+    {
+      schema: {
+        tags: ['profiles'],
+        summary: "Profiles this person follows",
+        description: describeRoute(
+          'Returns the profiles this person follows. Enumeration works anonymously; a cookie only resolves ' +
+            'viewer-relative fields. The handle costs one preliminary public-profile lookup because the ' +
+            'upstream list endpoint requires a numeric user id.',
+          [
+            {
+              title: 'List followed profiles',
+              curl: 'curl -s http://127.0.0.1:3000/profiles/alialfredji/following | jq',
+              ts: `const users = await substack.profiles.getFollowing('alialfredji');\nconsole.log(users.map((user) => user.handle));`,
+              upstream: 'GET https://substack.com/api/v1/user/{userId}/subscriber-lists?lists=following',
+            },
+          ],
+          'The upstream response is grouped and capped at 200 users. `page`, `offset`, and `limit` do not ' +
+            'expose another batch. This convenience route flattens the groups and deduplicates users by ' +
+            'numeric id; use `getSubscriberLists()` in the typed client to preserve groups. The gateway ' +
+            'handles Substack\'s browser-fingerprint check transparently.',
+        ),
+        params: requestSchema(HandleParamsSchema),
+        security: [{ substackCookie: [] }],
+        response: {
+          200: { description: 'Flat, deduplicated array of followed profiles.', ...responseSchema(z.array(SubscriberListUserSchema)) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const { handle } = request.params as { handle: string };
+      return app.substack.profiles.getFollowing(handle, { cookie: request.substackCookie });
+    },
+  );
+
+  app.get(
     '/profiles/by-id/:userId',
     {
       schema: {

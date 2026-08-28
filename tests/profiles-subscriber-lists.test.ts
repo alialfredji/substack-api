@@ -27,12 +27,12 @@ describe('profile subscriber lists', () => {
     const resource = new ProfilesResource({ request } as unknown as SubstackHttp);
     vi.spyOn(resource, 'getByHandle').mockResolvedValue({ id: 42, name: 'Example', handle: 'example' });
 
-    await resource.getSubscriberLists('example', ['subscribers', 'followers', 'followers']);
+    await resource.getSubscriberLists('example', ['subscribers', 'followers', 'following', 'followers']);
 
     expect(resource.getByHandle).toHaveBeenCalledWith('example', undefined);
     expect(request).toHaveBeenCalledWith(
       '/api/v1/user/42/subscriber-lists',
-      expect.objectContaining({ query: { lists: 'subscribers,followers' } }),
+      expect.objectContaining({ query: { lists: 'subscribers,followers,following' } }),
     );
   });
 
@@ -52,6 +52,25 @@ describe('profile subscriber lists', () => {
     const resource = new ProfilesResource({ request } as unknown as SubstackHttp);
 
     await expect(resource.getSubscribers(42)).resolves.toEqual([user(1), user(2)]);
+  });
+
+  it('returns a flat, deduplicated following list', async () => {
+    const request = vi.fn().mockResolvedValue({
+      subscriberLists: [
+        {
+          id: 'following',
+          name: 'Following',
+          groups: [{ name: null, users: [user(1), user(2), user(1)] }],
+        },
+      ],
+    });
+    const resource = new ProfilesResource({ request } as unknown as SubstackHttp);
+
+    await expect(resource.getFollowing(42)).resolves.toEqual([user(1), user(2)]);
+    expect(request).toHaveBeenCalledWith(
+      '/api/v1/user/42/subscriber-lists',
+      expect.objectContaining({ query: { lists: 'following' } }),
+    );
   });
 
   it('rejects an empty list selection without making a request', async () => {

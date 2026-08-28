@@ -26,7 +26,7 @@ Node **24 or newer** (developed on 25.8). No other services needed.
 Run it without a global install:
 
 ```bash
-npx --yes --package @alialf/substack-api@0.2.0 substack-api routes profiles
+npx --yes --package @alialf/substack-api@0.2.2 substack-api routes profiles
 ```
 
 Or install the binary globally:
@@ -106,7 +106,7 @@ Get it from DevTools → Application → Cookies → `substack.com` → `substac
 **Treat it like a password** — it is full account access, and `.env` is gitignored
 for that reason.
 
-The subscriber/follower endpoint is protected by a browser-fingerprint check.
+The subscriber/follower/following endpoint is protected by a browser-fingerprint check.
 The client handles it transparently: the first such call lazily bootstraps a
 browser-compatible HTTP session, and later calls reuse it. Public methods,
 Swagger routes, and cookie semantics are unchanged.
@@ -145,9 +145,10 @@ Substack's fixed or variable upstream page size.
 | `search({ query, page })` | Returns full profile objects, `subscriptions[]` included |
 | `searchAll({ query, limit, maxPages })` | Bounded page walk, deduped by profile id. Page size is fixed at 20 upstream |
 | `getSubscriptions(handle)` | Just the subscription list |
-| `getSubscriberLists(handleOrId, lists)` | Grouped subscribers/followers; numeric id is one request, handle is two |
+| `getSubscriberLists(handleOrId, lists)` | Grouped subscribers/followers/following; numeric id is one request, handle is two |
 | `getSubscribers(handleOrId)` | Flat, deduped public subscriber list |
 | `getFollowers(handleOrId)` | Flat, deduped public follower list |
+| `getFollowing(handleOrId)` | Flat, deduped list of followed profiles; capped at 200 upstream |
 | `subscriptionOverlap(a, b)` | Shared publications + count + Jaccard score |
 
 ### `substack.notes`
@@ -199,6 +200,7 @@ All `GET`. Browse and execute them at `/docs`.
 | `/profiles/{handle}/subscriptions` | Subscription list only |
 | `/profiles/{handle}/subscribers` | Public subscriber list |
 | `/profiles/{handle}/followers` | Public follower list |
+| `/profiles/{handle}/following` | Public list of followed profiles; capped at 200 upstream |
 | `/profiles/by-id/{userId}` | Profile by numeric id |
 | `/profiles/by-id/{userId}/handle` | Just the id → handle mapping (one request) |
 | `/profiles/search?query=&page=` | People search |
@@ -233,11 +235,11 @@ npx tsx examples/discovery.ts       # categories -> leaderboard
 
 ## A worked targeting pipeline
 
-The API does not let you ask *"who subscribes to publication X"* — subscriber
-lists are private and always will be. It does let you ask, for any person,
-*"what do they subscribe to"*. So you invert the query: gather candidates from
-public engagement surfaces, then score each by subscription overlap with your own
-reading.
+For a known profile, the relationship endpoint exposes its subscribers,
+followers, and up to 200 profiles it follows. For broader discovery beyond those
+fixed lists, every public profile also carries `subscriptions[]`. Gather
+candidates from public engagement surfaces, then score each by subscription
+overlap with your own reading.
 
 ```ts
 const substack = createSubstackClient({ cookie: process.env.SUBSTACK_COOKIE });
@@ -311,7 +313,8 @@ Details and evidence for each in [`docs/UPSTREAM.md`](docs/UPSTREAM.md).
 - **One category id is a string** (`"podcast"`), and it is a valid leaderboard id.
 - **Comment threads are gated** for some publications even though counts are
   public. An empty thread is not proof of no comments.
-- **No follower/following enumeration exists**, at all.
+- **Relationship lists are unpaginated.** The following list is capped at 200;
+  `page`, `offset`, and `limit` all return the same first batch.
 - **`reaction_count` can exceed `reactors.length`.** Do not assume they agree.
 
 ## Agent-friendly CLI

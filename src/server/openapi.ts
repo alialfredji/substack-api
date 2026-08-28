@@ -132,7 +132,7 @@ export const OPENAPI_TAGS = [
   {
     name: 'profiles',
     description:
-      'People. Fetch profiles, their public subscriber/follower lists, or search by keyword. ' +
+      'People. Fetch profiles, their public subscriber/follower/following lists, or search by keyword. ' +
       'Profile objects include public `subscriptions[]`, so one call gives you both a person and their subscription graph.',
   },
   {
