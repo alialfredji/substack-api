@@ -10,6 +10,7 @@
   "repository": "https://github.com/alialfredji/substack-api",
   "license": "MIT",
   "keywords": ["substack", "research", "profiles", "publications"],
+  "apps": "./.app.json",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
