@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "substack-api": {
+      "type": "http",
+      "url": "https://substack-api.alfredji.com/mcp"
+    }
+  }
+}

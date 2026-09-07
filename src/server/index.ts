@@ -13,13 +13,15 @@ import { buildApp } from './app.js';
 
 const port = Number(process.env['PORT'] ?? 3000);
 const host = process.env['HOST'] ?? '127.0.0.1';
+const publicUrl = process.env['PUBLIC_URL'] ?? `http://${host}:${port}`;
 
-const app = await buildApp({ publicUrl: `http://${host}:${port}` });
+const app = await buildApp({ publicUrl });
 
 try {
   await app.listen({ port, host });
   app.log.info(`Swagger UI  ->  http://${host}:${port}/docs`);
   app.log.info(`OpenAPI     ->  http://${host}:${port}/openapi.json`);
+  app.log.info(`MCP         ->  ${publicUrl}/mcp`);
   app.log.info(
     app.substack.authenticated
       ? 'Cookie detected: viewer-relative fields (is_subscribed, is_following) will resolve.'
