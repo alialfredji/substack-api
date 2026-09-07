@@ -29,6 +29,7 @@ import noteRoutes from './routes/notes.js';
 import publicationRoutes from './routes/publications.js';
 import discoveryRoutes from './routes/discovery.js';
 import metaRoutes from './routes/meta.js';
+import { registerMcpRoute } from '../mcp/server.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -180,6 +181,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(noteRoutes);
   await app.register(publicationRoutes);
   await app.register(discoveryRoutes);
+  await registerMcpRoute(app);
 
   return app;
 }

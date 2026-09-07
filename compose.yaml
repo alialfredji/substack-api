@@ -1,0 +1,17 @@
+name: substack-api
+
+services:
+  app:
+    build: .
+    container_name: ps-substack-api
+    restart: unless-stopped
+    environment:
+      PUBLIC_URL: https://substack-api.alfredji.com
+      OPENAI_APPS_CHALLENGE: ${OPENAI_APPS_CHALLENGE:-}
+    networks:
+      - edge
+
+networks:
+  edge:
+    external: true
+    name: personal-server-edge

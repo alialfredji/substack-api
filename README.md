@@ -13,7 +13,13 @@ engaging with.
   [`docs/UPSTREAM.md`](docs/UPSTREAM.md)
 
 📖 **Browse every route: <https://alialfredji.github.io/substack-api/>**
-— documentation only, there is no hosted API. The gateway runs on your machine.
+
+The ChatGPT plugin uses the hosted, anonymous MCP endpoint at
+`https://substack-api.alfredji.com/mcp`. The REST gateway can also run locally.
+
+Install the repo-local plugin from the ChatGPT/Codex Plugins Directory after
+opening this repository. Public ChatGPT distribution uses the same skill and
+MCP endpoint through OpenAI's universal Plugins Directory.
 
 ---
 

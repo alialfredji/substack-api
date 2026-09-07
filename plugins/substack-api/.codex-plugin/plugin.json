@@ -1,0 +1,33 @@
+{
+  "name": "substack-api",
+  "version": "0.2.2",
+  "description": "Search public Substack profiles, notes, publications, and discovery data.",
+  "author": {
+    "name": "Ali Alfredji",
+    "url": "https://github.com/alialfredji"
+  },
+  "homepage": "https://github.com/alialfredji/substack-api",
+  "repository": "https://github.com/alialfredji/substack-api",
+  "license": "MIT",
+  "keywords": ["substack", "research", "profiles", "publications"],
+  "apps": "./.app.json",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Substack API",
+    "shortDescription": "Research public Substack people and publications",
+    "longDescription": "Query Substack's public, undocumented API for profiles, subscription graphs, notes, reactors, publications, archives, comments, recommendations, categories, and leaderboards.",
+    "developerName": "Ali Alfredji",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/alialfredji/substack-api",
+    "privacyPolicyURL": "https://github.com/alialfredji/substack-api/blob/main/docs/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/alialfredji/substack-api/blob/main/docs/TERMS.md",
+    "defaultPrompt": [
+      "Find Substack writers about AI engineering.",
+      "Research a Substack profile and its public network.",
+      "Show the leading technology publications on Substack."
+    ],
+    "brandColor": "#FF6719"
+  }
+}
