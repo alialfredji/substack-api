@@ -28,6 +28,16 @@ const ConfigSchema = z.object({
 
 export default async function metaRoutes(app: FastifyInstance): Promise<void> {
   app.get(
+    '/.well-known/openai-apps-challenge',
+    { schema: { hide: true } },
+    async (_request, reply) => {
+      const token = process.env['OPENAI_APPS_CHALLENGE']?.trim();
+      if (!token) return reply.status(404).type('text/plain').send('Not configured');
+      return reply.type('text/plain').send(token);
+    },
+  );
+
+  app.get(
     '/health',
     {
       schema: {
