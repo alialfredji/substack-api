@@ -72,7 +72,7 @@ Start or restart Codex from that shell, then invoke
 Install directly from GitHub:
 
 ```bash
-npx skills add alialf/substack-api --skill substack-api --agent codex -g -y
+npx skills add alialfredji/substack-api --skill substack-api --agent codex -g -y
 ```
 
 Restart Codex after installing or updating the skill.

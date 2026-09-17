@@ -393,7 +393,7 @@ The repository also contains a Codex-compatible skill that invokes the published
 CLI and explains how to interpret its results:
 
 ```bash
-npx skills add alialf/substack-api --skill substack-api --agent codex -g -y
+npx skills add alialfredji/substack-api --skill substack-api --agent codex -g -y
 ```
 
 Restart Codex, then invoke `$substack-api` or ask it to query Substack profiles,
