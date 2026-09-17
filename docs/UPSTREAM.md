@@ -2,11 +2,12 @@
 
 Everything below was verified against the live API by direct probing, not taken
 from documentation — there is no documentation. Dates matter for a surface like
-this: **core endpoints verified 2026-08-17; pagination rechecked 2026-08-20**.
+this: **core endpoints verified 2026-08-17; engagement endpoints rechecked
+2026-09-17**.
 Treat anything here as liable to change without notice.
 
 Negative results are recorded deliberately. Knowing that `/api/v1/comment/{id}/restacks`
-returns 404 saves the next person an afternoon.
+returns 404 — while `/restackers` works — saves the next person an afternoon.
 
 ---
 
@@ -86,8 +87,10 @@ routes fall into four groups:
 | Page | `category/public/{id}/all` | 25 records per page; `limit` ignored | `more: false` |
 | Cursor | `reader/feed/profile/{userId}` | Pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
 | Cursor | `reader/feed` | Pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
+| Cursor | `reader/comment/{noteId}/replies` | Reply branches; pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
+| Cursor | Publication-scoped `reader/post/{postId}/replies` | Reply branches; pass opaque `nextCursor` back unchanged | Missing `nextCursor` |
 | Offset | Publication-scoped `archive` | `limit` is honored; advance `offset` by the number returned | Empty or short batch |
-| Unpaginated | Subscriber/follower/following lists, reactors, comments, recommendations, categories | `page`, `offset`, and/or `limit` do not expose another batch | Single response only |
+| Unpaginated | Subscriber/follower/following lists, reactors, restackers, legacy comments, recommendations, categories | `page`, `offset`, and/or `limit` do not expose another batch | Single response only |
 
 Collectors must also stop if a page, cursor, or batch repeats. That guard is
 important for an undocumented API where a nominal continuation field can drift
@@ -201,6 +204,8 @@ body — Substack validates params and names them:
 | Endpoint | Returns | Notes |
 |---|---|---|
 | `/api/v1/comment/{noteId}/reactors` | **bare array** | Who liked a note. Carries `is_subscribed` / `is_following`. |
+| `/api/v1/comment/{noteId}/restackers` | **bare array** | Who restacked a note. |
+| `/api/v1/reader/comment/{noteId}/replies?publication_id={publicationId}&comment_id={noteId}&cursor={cursor}` | `{ commentBranches, moreBranches, nextCursor, rootComment, automodHiddenBranches }` | Cursor-paginated note replies. |
 | `/api/v1/reader/feed/profile/{userId}?types[]=note&cursor={cursor}` | `{ items, originalCursorTimestamp, nextCursor }` | One person's notes. Cursor-paginated. |
 | `/api/v1/reader/feed?types[]=note&cursor={cursor}` | same + `trackingParameters` | Suggested feed. Cursor-paginated; anonymous returns cold-start picks. |
 | `/api/v1/reader/comment/{noteId}` | `{ item }` | Single note. |
@@ -232,6 +237,10 @@ per-user reaction data on the comment; `/reactors` is the only way to get it.
 | `/api/v1/publication/search?query={q}&page={n}` | `{ results, more }` | Ranked page search; pages can overlap. `limit` is ignored. |
 | `/api/v1/post/search?query={q}&limit={n}` | `{ focused, results, resultsWithTrackingParams, more, publications }` | |
 | `/api/v1/archive?sort=new&limit={n}&offset={n}` | **bare array** | *Publication-scoped.* Offset-paginated; `limit` is honored. |
+| `/api/v1/post/{postId}/facepile` | `{ reactors, restackers }` | *Publication-scoped preview only.* Smaller than the full lists. |
+| `/api/v1/post/{postId}/reactors` | **bare array** | *Publication-scoped.* Who liked the post. |
+| `/api/v1/post/{postId}/restackers` | **bare array** | *Publication-scoped.* Who restacked the post. |
+| `/api/v1/reader/post/{postId}/replies?publication_id={publicationId}&cursor={cursor}` | `{ commentBranches, moreBranches, nextCursor, automodHiddenBranches }` | *Publication-scoped.* Cursor-paginated replies. |
 | `/api/v1/recommendations/from/{publicationId}` | **bare array** | *Publication-scoped and unpaginated.* Which publications this one recommends. |
 | `/api/v1/post/{postId}/comments?all_comments=true&sort=best_first` | comment tree | *Publication-scoped and unpaginated.* |
 
@@ -338,15 +347,26 @@ free publication before concluding the endpoint is broken.
 Comment envelope is `{ comments: [], automod_hidden_comments: [] }`. Replies nest
 under `children`, arbitrarily deep in principle (2 levels observed).
 
-### Notes: reactors
+### Engagement identities and aggregate counts
 
 No pagination. `limit`, `offset` and `page` are all accepted and all ignored —
 every variant returns the identical full array. The list simply grows as the note
 gains reactions (the same fixture note returned 5 reactors, then 8 later), so it
 is not capped, just unpaginated.
 
-`reaction_count` can exceed `reactors.length` — likely deactivated accounts whose
-like still counts in the aggregate. Do not assume the two agree.
+Aggregate counts can exceed the number of exposed identities — likely
+deactivated, private, blocked, or otherwise filtered accounts whose action still
+counts. Verified examples on 2026-09-17:
+
+- Post `213684376`: `reaction_count=16`, facepile reactors `5`, full reactors `11`.
+- Post `207008579`: `restacks=3`, full restackers `2`.
+
+Do not assume the values agree. Preserve the aggregate count and enumerated
+count separately; treat identity lists as a lower bound.
+
+The reader replies endpoints return top-level `commentBranches`; each branch
+contains `comment` and flattened `descendantComments`. Note `337504999`
+returned eight branches and a real `nextCursor` on its first page.
 
 `types[]` accepts `note`, `comment`, `post`, `like`, `restack`, and multiple
 values combine rather than last-wins. `nextCursor` genuinely advances (the

@@ -14,6 +14,7 @@ import {
   ReactorListSchema,
   NoteContextUserSchema,
 } from '../../schemas/note.js';
+import { ReaderRepliesPageSchema } from '../../schemas/post.js';
 
 /** Valid `types[]` values, per live verification against the profile feed endpoint. */
 const NOTE_FEED_TYPES_NOTE = 'note, comment, post, like, restack';
@@ -55,6 +56,12 @@ const ReactorsQuerySchema = z.object({
         'is_subscribed: false and this filter would silently return a worthless "everyone" list, ' +
         'so the gateway 401s instead.',
     ),
+});
+
+const RepliesQuerySchema = z.object({
+  publicationId: z.coerce.number().int().positive().describe("The note's `comment.publication_id` value."),
+  cursor: z.string().optional().describe('`nextCursor` from a previous replies page.'),
+  onlyTopLevel: z.coerce.boolean().optional().describe('Ask upstream for only top-level branches.'),
 });
 
 export default async function noteRoutes(app: FastifyInstance): Promise<void> {
@@ -211,6 +218,82 @@ export default async function noteRoutes(app: FastifyInstance): Promise<void> {
       return request.query.unsubscribedOnly === 'true'
         ? app.substack.notes.unsubscribedReactors(noteId, opts)
         : app.substack.notes.reactors(noteId, opts);
+    },
+  );
+
+  app.get<{ Params: { noteId: string } }>(
+    '/notes/:noteId/restackers',
+    {
+      schema: {
+        tags: ['notes'],
+        summary: 'Who restacked a note',
+        params: requestSchema(NoteParamsSchema),
+        description: describeRoute(
+          'Every account Substack exposes as having restacked a note. This is an unpaginated bare list.',
+          [
+            {
+              title: 'List note restackers',
+              curl: 'curl -s "http://127.0.0.1:3000/notes/337504999/restackers" | jq',
+              ts: `const people = await substack.notes.restackers(337504999);`,
+              upstream: 'GET /api/v1/comment/{noteId}/restackers',
+            },
+          ],
+          'The working suffix is `/restackers`; the plausible `/restacks` variant was verified to 404.',
+        ),
+        response: {
+          200: { description: 'Restackers.', ...responseSchema(ReactorListSchema) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const noteId = Number(request.params.noteId);
+      return app.substack.notes.restackers(noteId, { cookie: request.substackCookie });
+    },
+  );
+
+  app.get<{
+    Params: { noteId: string };
+    Querystring: { publicationId: number; cursor?: string; onlyTopLevel?: boolean };
+  }>(
+    '/notes/:noteId/replies',
+    {
+      schema: {
+        tags: ['notes'],
+        summary: "Fetch a note's replies",
+        params: requestSchema(NoteParamsSchema),
+        querystring: requestSchema(RepliesQuerySchema),
+        description: describeRoute(
+          'Cursor-paginated reply branches for a note. Each branch contains one top-level `comment` and its ' +
+            '`descendantComments`.',
+          [
+            {
+              title: 'Fetch the first page of note replies',
+              curl:
+                'curl -s "http://127.0.0.1:3000/notes/337504999/replies?publicationId=9341396" | jq',
+              ts:
+                'const page = await substack.notes.replies(337504999, { publicationId: 9341396 });\n' +
+                'console.log(page.commentBranches.length, page.nextCursor);',
+              upstream: 'GET /api/v1/reader/comment/{noteId}/replies',
+            },
+          ],
+          'Pass `nextCursor` back as `cursor`, or use `substack-api collect` / `notes.collectReplies()` for ' +
+            'a bounded walk. `publicationId` is available on the note\'s `comment.publication_id` field.',
+        ),
+        response: {
+          200: { description: 'A page of reply branches.', ...responseSchema(ReaderRepliesPageSchema) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const noteId = Number(request.params.noteId);
+      const { publicationId, cursor, onlyTopLevel } = request.query;
+      return app.substack.notes.replies(
+        noteId,
+        { publicationId, cursor, onlyTopLevel },
+        { cookie: request.substackCookie },
+      );
     },
   );
 

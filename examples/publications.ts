@@ -91,7 +91,28 @@ async function main(): Promise<void> {
     sample: commenters.slice(0, 5),
   });
 
-  // 6. Recommendation graph, from the fixture publication.
+  // 6. Complete engagement lists and the newer cursor-paginated reply surface.
+  // Use Ali's public Modern Builder publication because these fixtures have
+  // known reactions and restacks and work anonymously.
+  const engagementSubdomain = 'alialf';
+  const engagementPublicationId = 9341396;
+  const engagementPostId = 213684376;
+  const restackedPostId = 207008579;
+  const facepile = await substack.publications.facepile(engagementSubdomain, engagementPostId);
+  const postReactors = await substack.publications.reactors(engagementSubdomain, engagementPostId);
+  const postRestackers = await substack.publications.restackers(engagementSubdomain, restackedPostId);
+  const postReplyPage = await substack.publications.replies(engagementSubdomain, engagementPostId, {
+    publicationId: engagementPublicationId,
+  });
+  log('Modern Builder post engagement', {
+    facepileReactors: facepile.reactors.length,
+    fullReactors: postReactors.length,
+    fullRestackers: postRestackers.length,
+    replyBranches: postReplyPage.commentBranches.length,
+    hasNextReplyCursor: Boolean(postReplyPage.nextCursor),
+  });
+
+  // 7. Recommendation graph, from the fixture publication.
   const publicationId = 5081214; // aieworks
   const recs = await substack.publications.recommendations(subdomain, publicationId);
   log(`publications.recommendations("${subdomain}", ${publicationId}) — ${recs.length} edges`, {
@@ -102,7 +123,7 @@ async function main(): Promise<void> {
     })),
   });
 
-  // 7. Related publications: BFS a couple of hops out, bounded.
+  // 8. Related publications: BFS a couple of hops out, bounded.
   const related = await substack.publications.relatedPublications(subdomain, publicationId, {
     limit: 15,
     maxPages: 3,

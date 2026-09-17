@@ -113,6 +113,36 @@ describe('collectRoute', () => {
     expect(fake.calls[1]!.searchParams.get('types')).toBe('note,like');
   });
 
+  it('walks cursor-paginated reply branches and deduplicates by comment id', async () => {
+    const fake = responder((url) => {
+      const cursor = url.searchParams.get('cursor');
+      return cursor === null
+        ? {
+            commentBranches: [{ comment: { id: 1 } }, { comment: { id: 2 } }],
+            nextCursor: 'next-token',
+          }
+        : {
+            commentBranches: [{ comment: { id: 2 } }, { comment: { id: 3 } }],
+            nextCursor: null,
+          };
+    });
+
+    const result = await collectRoute({
+      target: '/notes/337504999/replies?publicationId=9341396',
+      limit: 10,
+      maxPages: 3,
+      request: fake.request,
+    });
+
+    expect(result.items).toEqual([
+      { comment: { id: 1 } },
+      { comment: { id: 2 } },
+      { comment: { id: 3 } },
+    ]);
+    expect(fake.calls[1]!.searchParams.get('cursor')).toBe('next-token');
+    expect(fake.calls[1]!.searchParams.get('publicationId')).toBe('9341396');
+  });
+
   it('uses offset and a bounded request size for publication archives', async () => {
     const fake = responder((url) => {
       const offset = Number(url.searchParams.get('offset'));

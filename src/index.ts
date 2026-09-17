@@ -51,10 +51,14 @@ export {
   NotesResource,
   type NoteFeedParams,
   type CollectNoteFeedOptions,
+  type NoteRepliesParams,
+  type CollectNoteRepliesOptions,
 } from './client/resources/notes.js';
 export {
   PublicationsResource,
   type ArchiveAllOptions,
+  type PostRepliesParams,
+  type CollectPostRepliesOptions,
 } from './client/resources/publications.js';
 export { DiscoveryResource } from './client/resources/discovery.js';
 

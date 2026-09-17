@@ -12,6 +12,7 @@
 
 import { z } from 'zod';
 import { MaybeBoolean, MaybeNumber, MaybeString, UserStatusSchema } from './common.js';
+import { ReactorListSchema } from './note.js';
 
 /** A byline entry on `Post.publishedBylines`. Same author shape as elsewhere. */
 export const PublishedBylineSchema = z.looseObject({
@@ -170,7 +171,7 @@ export const CommentSchema: z.ZodType<Comment> = z.lazy(() =>
     handle: MaybeString,
     reactor_names: z.array(z.unknown()).nullish(),
     reaction: MaybeString,
-    reactions: z.record(z.string(), z.number()).nullish(),
+    reactions: z.object({}).catchall(z.number()).nullish(),
     reaction_count: MaybeNumber,
     children: z.array(CommentSchema).nullish(),
     children_count: MaybeNumber,
@@ -196,6 +197,40 @@ export const CommentsEnvelopeSchema = z.looseObject({
   automod_hidden_comments: z.array(z.unknown()).nullish(),
 });
 export type CommentsEnvelope = z.infer<typeof CommentsEnvelopeSchema>;
+
+/** A nested reply item inside a reader replies branch. */
+export const ReaderDescendantCommentSchema = z.looseObject({
+  type: z.string(),
+  comment: CommentSchema.nullish(),
+});
+export type ReaderDescendantComment = z.infer<typeof ReaderDescendantCommentSchema>;
+
+/** One top-level comment and the replies Substack bundles beneath it. */
+export const ReaderCommentBranchSchema = z.looseObject({
+  comment: CommentSchema,
+  descendantComments: z.array(ReaderDescendantCommentSchema),
+});
+export type ReaderCommentBranch = z.infer<typeof ReaderCommentBranchSchema>;
+
+/**
+ * Cursor-paginated response shared by the reader replies endpoints for Notes
+ * and publication posts.
+ */
+export const ReaderRepliesPageSchema = z.looseObject({
+  commentBranches: z.array(ReaderCommentBranchSchema),
+  moreBranches: MaybeNumber,
+  nextCursor: MaybeString,
+  rootComment: CommentSchema.nullish(),
+  automodHiddenBranches: z.array(ReaderCommentBranchSchema).nullish(),
+});
+export type ReaderRepliesPage = z.infer<typeof ReaderRepliesPageSchema>;
+
+/** Small post-page preview; use the full reactors/restackers endpoints for enumeration. */
+export const PostFacepileSchema = z.looseObject({
+  reactors: ReactorListSchema,
+  restackers: ReactorListSchema,
+});
+export type PostFacepile = z.infer<typeof PostFacepileSchema>;
 
 /**
  * A person harvested from a comment thread, deduplicated by `user_id`.

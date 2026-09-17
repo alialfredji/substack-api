@@ -18,7 +18,7 @@ export interface CollectEnvelope {
   continuation: CollectContinuation | null;
 }
 
-type RouteKind = 'profile-search' | 'publication-search' | 'notes' | 'archive' | 'leaderboard';
+type RouteKind = 'profile-search' | 'publication-search' | 'notes' | 'replies' | 'archive' | 'leaderboard';
 
 interface PageShape {
   items: unknown[];
@@ -32,6 +32,8 @@ function routeKind(pathname: string): RouteKind | null {
   if (pathname === '/profiles/search') return 'profile-search';
   if (pathname === '/publications/search') return 'publication-search';
   if (pathname === '/notes/suggested' || /^\/notes\/profile\/[^/]+$/.test(pathname)) return 'notes';
+  if (/^\/notes\/[^/]+\/replies$/.test(pathname)) return 'replies';
+  if (/^\/publications\/[^/]+\/posts\/[^/]+\/replies$/.test(pathname)) return 'replies';
   if (/^\/publications\/[^/]+\/archive$/.test(pathname)) return 'archive';
   if (/^\/discovery\/categories\/[^/]+\/leaderboard$/.test(pathname)) return 'leaderboard';
   return null;
@@ -65,11 +67,19 @@ function itemKey(item: unknown): string | null {
   return typeof key === 'string' || typeof key === 'number' ? String(key) : null;
 }
 
+function replyBranchKey(item: unknown): string | null {
+  if (!item || typeof item !== 'object') return null;
+  const comment = (item as Record<string, unknown>)['comment'];
+  if (!comment || typeof comment !== 'object') return null;
+  const id = (comment as Record<string, unknown>)['id'];
+  return typeof id === 'string' || typeof id === 'number' ? String(id) : null;
+}
+
 function addUnique(target: unknown[], seen: Set<string>, incoming: unknown[], limit: number): boolean {
   let truncated = false;
 
   for (const item of incoming) {
-    const key = itemKey(item);
+    const key = itemKey(item) ?? replyBranchKey(item);
     if (key !== null) {
       if (seen.has(key)) continue;
       seen.add(key);
@@ -89,7 +99,7 @@ function addUnique(target: unknown[], seen: Set<string>, incoming: unknown[], li
 function pageSignature(items: unknown[]): string {
   return items
     .map((item) => {
-      const key = itemKey(item);
+      const key = itemKey(item) ?? replyBranchKey(item);
       if (key !== null) return `key:${key}`;
       return `json:${JSON.stringify(item)}`;
     })
@@ -166,6 +176,17 @@ async function fetchPage(
     };
   }
 
+  if (kind === 'replies') {
+    const payload = objectPayload(await fetchPayload(url, request), 'reader replies');
+    const items = arrayField(payload, 'commentBranches', 'reader replies');
+    const cursor = typeof payload['nextCursor'] === 'string' ? payload['nextCursor'] : null;
+    return {
+      items,
+      hasMore: cursor !== null && cursor.length > 0,
+      continuation: cursor ? { parameter: 'cursor', value: cursor } : null,
+    };
+  }
+
   const page = pageNumber(url);
   url.searchParams.set('page', String(page));
   let payload = objectPayload(await fetchPayload(url, request), kind);
@@ -207,7 +228,7 @@ export async function collectRoute(options: CollectOptions): Promise<CollectEnve
   const kind = routeKind(url.pathname);
   if (!kind) {
     throw new Error(
-      `Route does not support collection: ${url.pathname}. Supported routes are profile search, publication search, profile/suggested notes, publication archives, and category leaderboards`,
+      `Route does not support collection: ${url.pathname}. Supported routes are profile search, publication search, profile/suggested notes, note/post replies, publication archives, and category leaderboards`,
     );
   }
 

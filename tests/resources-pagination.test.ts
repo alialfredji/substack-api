@@ -6,7 +6,7 @@ import { NotesResource } from '../src/client/resources/notes.js';
 import { DiscoveryResource } from '../src/client/resources/discovery.js';
 import type { Profile } from '../src/schemas/profile.js';
 import type { Publication } from '../src/schemas/common.js';
-import type { Post } from '../src/schemas/post.js';
+import type { Post, ReaderCommentBranch, ReaderRepliesPage } from '../src/schemas/post.js';
 import type { NoteFeedItem, NoteFeedPage } from '../src/schemas/note.js';
 import type { LeaderboardPage } from '../src/schemas/discovery.js';
 
@@ -20,6 +20,11 @@ const item = (id: number): NoteFeedItem => ({
 });
 const feedPage = (ids: number[], nextCursor?: string): NoteFeedPage => ({
   items: ids.map(item),
+  nextCursor,
+});
+const branch = (id: number): ReaderCommentBranch => ({ comment: { id }, descendantComments: [] });
+const repliesPage = (ids: number[], nextCursor?: string): ReaderRepliesPage => ({
+  commentBranches: ids.map(branch),
   nextCursor,
 });
 
@@ -124,6 +129,46 @@ describe('note feed pagination', () => {
     const result = await resource.collectSuggestedNotes({ limit: 10, maxPages: 5, types: ['like'] });
 
     expect(result.map(({ entity_key }) => entity_key)).toEqual(['c-1', 'c-2', 'c-3']);
+  });
+});
+
+describe('engagement reply pagination', () => {
+  it('collects and deduplicates note reply branches', async () => {
+    const resource = new NotesResource({} as SubstackHttp);
+    const replies = vi.spyOn(resource, 'replies')
+      .mockResolvedValueOnce(repliesPage([1, 2], 'cursor-a'))
+      .mockResolvedValueOnce(repliesPage([2, 3]));
+
+    const result = await resource.collectReplies(99, {
+      publicationId: 123,
+      limit: 10,
+      maxPages: 5,
+    });
+
+    expect(result.map(({ comment }) => comment.id)).toEqual([1, 2, 3]);
+    expect(replies.mock.calls.map((call) => call[1])).toEqual([
+      { publicationId: 123, cursor: undefined, onlyTopLevel: undefined },
+      { publicationId: 123, cursor: 'cursor-a', onlyTopLevel: undefined },
+    ]);
+  });
+
+  it('collects and deduplicates post reply branches', async () => {
+    const resource = new PublicationsResource({} as SubstackHttp);
+    const replies = vi.spyOn(resource, 'replies')
+      .mockResolvedValueOnce(repliesPage([1, 2], 'cursor-a'))
+      .mockResolvedValueOnce(repliesPage([2, 3]));
+
+    const result = await resource.collectReplies('example', 88, {
+      publicationId: 456,
+      limit: 10,
+      maxPages: 5,
+    });
+
+    expect(result.map(({ comment }) => comment.id)).toEqual([1, 2, 3]);
+    expect(replies.mock.calls.map((call) => call[3])).toEqual([
+      { cookie: undefined, signal: undefined },
+      { cookie: undefined, signal: undefined },
+    ]);
   });
 });
 
