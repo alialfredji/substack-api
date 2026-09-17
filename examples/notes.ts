@@ -16,7 +16,8 @@ import { createSubstackClient } from '../src/client/client.js';
 const substack = createSubstackClient();
 
 const USER_ID = 86433889; // alialfredji
-const NOTE_ID = 314595743; // has 6 reactions but only 5 reactors — see schemas/note.ts
+const NOTE_ID = 337504999;
+const PUBLICATION_ID = 9341396; // Modern Builder / alialf
 
 async function main(): Promise<void> {
   // listByProfile: a profile's own notes, cursor-paginated.
@@ -51,6 +52,24 @@ async function main(): Promise<void> {
   // reactors: everyone who liked it. No working pagination — this is the full list.
   const reactors = await substack.notes.reactors(NOTE_ID);
   console.log(`reactors: ${reactors.length} accounts (reaction_count said ${note.comment?.reaction_count})`);
+
+  // restackers: everyone Substack exposes as having restacked this note.
+  const restackers = await substack.notes.restackers(NOTE_ID);
+  console.log(`restackers: ${restackers.length} accounts (aggregate said ${note.comment?.restacks})`);
+
+  // replies: one modern reader page, organised into top-level branches and descendants.
+  const replyPage = await substack.notes.replies(NOTE_ID, { publicationId: PUBLICATION_ID });
+  console.log(
+    `replies: ${replyPage.commentBranches.length} branches, nextCursor=${replyPage.nextCursor ? 'present' : 'none'}`,
+  );
+
+  // collectReplies: bounded cursor walk with top-level comment-id deduplication.
+  const replyBranches = await substack.notes.collectReplies(NOTE_ID, {
+    publicationId: PUBLICATION_ID,
+    limit: 50,
+    maxPages: 10,
+  });
+  console.log(`collectReplies: ${replyBranches.length} unique top-level branches`);
 
   // collectProfileNotes: walk every page up to a bounded limit.
   const collected = await substack.notes.collectProfileNotes(USER_ID, { limit: 30, maxPages: 5 });

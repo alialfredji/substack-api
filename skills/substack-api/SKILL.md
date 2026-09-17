@@ -1,6 +1,6 @@
 ---
 name: substack-api
-description: Query Substack's public read-only API through a scriptable JSON CLI. Use when an agent needs Substack profiles, profile searches, public subscriber, follower, or following lists, public subscription graphs, note feeds, note reactors, publications, post archives, comments, recommendations, related publications, categories, or leaderboards; when it needs to discover or inspect the available Substack API routes; or when it needs to combine these calls into research and targeting workflows.
+description: Query Substack's public read-only API through a scriptable JSON CLI. Use when an agent needs Substack profiles, profile searches, public subscriber, follower, or following lists, public subscription graphs, note feeds, note or post reactors, restackers, replies, publications, post archives, comments, recommendations, related publications, categories, or leaderboards; when it needs to discover or inspect the available Substack API routes; or when it needs to combine these calls into research and targeting workflows.
 ---
 
 # Substack API
@@ -63,9 +63,9 @@ Substack has no uniform pagination contract:
 | Strategy | Collections |
 |---|---|
 | `page` | Profile search, publication search, category leaderboards |
-| `nextCursor` | Profile Notes, suggested Notes |
+| `nextCursor` | Profile Notes, suggested Notes, note replies, post replies |
 | `offset` + `limit` | Publication archives |
-| None known | Subscriber/follower/following lists, note reactors, comments, recommendations, categories |
+| None known | Subscriber/follower/following lists, note/post reactors and restackers, legacy comments, recommendations, categories |
 
 Never invent pagination parameters for an unpaginated route. Stop if a
 continuation value or page repeats, even when the upstream response claims more
@@ -98,7 +98,8 @@ All route data is public. The client transparently uses its browser-compatible t
   `limit`.
 - Dedupe publication-search pages by publication id because ranked pages can
   overlap.
-- Do not assume reaction counts equal the number of returned reactors.
+- Do not assume aggregate reaction or restack counts equal the number of returned people. Preserve both; enumerated identities are a lower bound.
+- Prefer cursor-paginated `/replies` routes when walking discussions. The legacy post comments route remains useful but is unpaginated and may be gated.
 - Treat empty gated comment threads as inconclusive rather than proof that no comments exist.
 - Keep request volume polite, retain the conservative pacing defaults, and
   avoid unbounded enumeration. Do not bypass a final 429 by immediately

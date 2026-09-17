@@ -14,7 +14,15 @@ import {
   RecommendationsResponseSchema,
   RelatedPublicationSchema,
 } from '../../schemas/publication.js';
-import { ArchiveResponseSchema, PostSchema, CommentsEnvelopeSchema, CommenterSchema } from '../../schemas/post.js';
+import {
+  ArchiveResponseSchema,
+  PostSchema,
+  CommentsEnvelopeSchema,
+  CommenterSchema,
+  PostFacepileSchema,
+  ReaderRepliesPageSchema,
+} from '../../schemas/post.js';
+import { ReactorListSchema } from '../../schemas/note.js';
 
 const SubdomainParamSchema = z.object({
   subdomain: z
@@ -69,6 +77,11 @@ const ArchiveQuerySchema = z.object({
 const CommentsQuerySchema = z.object({
   sort: z.string().optional().describe('Verified: "best_first" works. Other values untested.'),
   allComments: z.coerce.boolean().optional().describe('Forwarded as `all_comments`. Defaults to true.'),
+});
+
+const RepliesQuerySchema = z.object({
+  publicationId: z.coerce.number().int().positive().describe("The post's `publication_id` value."),
+  cursor: z.string().optional().describe('`nextCursor` from a previous replies page.'),
 });
 
 const RecommendationsQuerySchema = z.object({
@@ -222,6 +235,135 @@ export default async function publicationRoutes(app: FastifyInstance): Promise<v
     async (request) => {
       const { subdomain, slug } = request.params;
       return app.substack.publications.getPost(subdomain, slug, { cookie: request.substackCookie });
+    },
+  );
+
+  app.get<{ Params: { subdomain: string; postId: number } }>(
+    '/publications/:subdomain/posts/:postId/facepile',
+    {
+      schema: {
+        tags: ['publications'],
+        summary: "Fetch a post's engagement preview",
+        params: requestSchema(PostIdParamSchema),
+        description: describeRoute(
+          'Small preview lists of post reactors and restackers.',
+          [
+            {
+              title: 'Fetch a post facepile',
+              curl: 'curl -s http://127.0.0.1:3000/publications/alialf/posts/213684376/facepile | jq',
+              ts: `const preview = await substack.publications.facepile('alialf', 213684376);`,
+              upstream: 'GET https://{subdomain}.substack.com/api/v1/post/{postId}/facepile',
+            },
+          ],
+          'This is a preview, not complete enumeration. Use the reactors and restackers routes for full upstream lists.',
+        ),
+        response: {
+          200: { description: 'Engagement preview.', ...responseSchema(PostFacepileSchema) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const { subdomain, postId } = request.params;
+      return app.substack.publications.facepile(subdomain, postId, { cookie: request.substackCookie });
+    },
+  );
+
+  app.get<{ Params: { subdomain: string; postId: number } }>(
+    '/publications/:subdomain/posts/:postId/reactors',
+    {
+      schema: {
+        tags: ['publications'],
+        summary: 'Who reacted to a post',
+        params: requestSchema(PostIdParamSchema),
+        description: describeRoute('Every account Substack exposes as having liked a publication post.', [
+          {
+            title: 'List post reactors',
+            curl: 'curl -s http://127.0.0.1:3000/publications/alialf/posts/213684376/reactors | jq',
+            ts: `const people = await substack.publications.reactors('alialf', 213684376);`,
+            upstream: 'GET https://{subdomain}.substack.com/api/v1/post/{postId}/reactors',
+          },
+        ]),
+        response: {
+          200: { description: 'Reactors.', ...responseSchema(ReactorListSchema) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const { subdomain, postId } = request.params;
+      return app.substack.publications.reactors(subdomain, postId, { cookie: request.substackCookie });
+    },
+  );
+
+  app.get<{ Params: { subdomain: string; postId: number } }>(
+    '/publications/:subdomain/posts/:postId/restackers',
+    {
+      schema: {
+        tags: ['publications'],
+        summary: 'Who restacked a post',
+        params: requestSchema(PostIdParamSchema),
+        description: describeRoute('Every account Substack exposes as having restacked a publication post.', [
+          {
+            title: 'List post restackers',
+            curl: 'curl -s http://127.0.0.1:3000/publications/alialf/posts/207008579/restackers | jq',
+            ts: `const people = await substack.publications.restackers('alialf', 207008579);`,
+            upstream: 'GET https://{subdomain}.substack.com/api/v1/post/{postId}/restackers',
+          },
+        ]),
+        response: {
+          200: { description: 'Restackers.', ...responseSchema(ReactorListSchema) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const { subdomain, postId } = request.params;
+      return app.substack.publications.restackers(subdomain, postId, { cookie: request.substackCookie });
+    },
+  );
+
+  app.get<{
+    Params: { subdomain: string; postId: number };
+    Querystring: { publicationId: number; cursor?: string };
+  }>(
+    '/publications/:subdomain/posts/:postId/replies',
+    {
+      schema: {
+        tags: ['publications'],
+        summary: "Fetch a post's paginated replies",
+        params: requestSchema(PostIdParamSchema),
+        querystring: requestSchema(RepliesQuerySchema),
+        description: describeRoute(
+          'The modern cursor-paginated reader reply surface. Each branch contains a top-level comment and its descendants.',
+          [
+            {
+              title: 'Fetch the first page of post replies',
+              curl:
+                'curl -s "http://127.0.0.1:3000/publications/alialf/posts/213684376/replies?publicationId=9341396" | jq',
+              ts:
+                "const page = await substack.publications.replies('alialf', 213684376, { publicationId: 9341396 });",
+              upstream: 'GET https://{subdomain}.substack.com/api/v1/reader/post/{postId}/replies',
+            },
+          ],
+          'Pass `nextCursor` back as `cursor`, or use `substack-api collect` / ' +
+            '`publications.collectReplies()` for a bounded walk. The legacy `/comments` route remains available.',
+        ),
+        response: {
+          200: { description: 'A page of reply branches.', ...responseSchema(ReaderRepliesPageSchema) },
+          ...commonErrorResponses,
+        },
+      },
+    },
+    async (request) => {
+      const { subdomain, postId } = request.params;
+      const { publicationId, cursor } = request.query;
+      return app.substack.publications.replies(
+        subdomain,
+        postId,
+        { publicationId, cursor },
+        { cookie: request.substackCookie },
+      );
     },
   );
 

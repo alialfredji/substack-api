@@ -127,9 +127,9 @@ Pagination is route-specific because the upstream API has no common convention:
 | Strategy | Collections | Continuation |
 |---|---|---|
 | Page | Profile search, publication search, category leaderboards | Increment `page`; stop when `more` is false |
-| Cursor | Profile Notes, suggested Notes | Pass the returned `nextCursor` |
+| Cursor | Profile Notes, suggested Notes, note replies, post replies | Pass the returned `nextCursor` |
 | Offset | Publication archives | Increase `offset` by the number of posts returned |
-| Unpaginated | Note reactors, comments, recommendations, categories | No working upstream continuation mechanism is known |
+| Unpaginated | Note/post reactors and restackers, legacy comments, recommendations, categories | No working upstream continuation mechanism is known |
 
 Use the `*All` / `collect*` helpers below for bounded multi-page work. A `limit`
 caps collected items; `maxPages` caps upstream requests. Neither changes
@@ -156,6 +156,9 @@ Substack's fixed or variable upstream page size.
 | Method | Notes |
 |---|---|
 | `reactors(noteId)` | Who liked a note. Carries `is_subscribed` / `is_following` |
+| `restackers(noteId)` | Who restacked a note |
+| `replies(noteId, { publicationId, cursor })` | One cursor-paginated page of reply branches |
+| `collectReplies(noteId, { publicationId, limit, maxPages })` | Bounded reply cursor walk, deduped by top-level comment id |
 | `unsubscribedReactors(noteId)` | Liked but not subscribed. **Requires a cookie** |
 | `listByProfile(userId, { cursor, types })` | One person's notes |
 | `listSuggested({ cursor, types })` | The suggested feed |
@@ -173,6 +176,11 @@ Substack's fixed or variable upstream page size.
 | `archive(subdomain, { limit, offset, sort })` | Post list. `offset` genuinely pages |
 | `archiveAll(subdomain, { limit, maxPages, pageSize, sort })` | Bounded offset walk; `pageSize` controls each archive request |
 | `getPost(subdomain, slug)` | Slug only; there is no numeric post lookup |
+| `facepile(subdomain, postId)` | Small reactors/restackers preview; not complete enumeration |
+| `reactors(subdomain, postId)` | Who liked a post |
+| `restackers(subdomain, postId)` | Who restacked a post |
+| `replies(subdomain, postId, { publicationId, cursor })` | One cursor-paginated page of modern reply branches |
+| `collectReplies(subdomain, postId, { publicationId, limit, maxPages })` | Bounded reply cursor walk |
 | `comments(subdomain, postId, { sort, allComments })` | Nested thread |
 | `commenters(subdomain, postId)` | Flattened, deduped people from a comment tree |
 | `recommendations(subdomain, publicationId)` | Publications this one recommends |
@@ -206,6 +214,8 @@ All `GET`. Browse and execute them at `/docs`.
 | `/profiles/search?query=&page=` | People search |
 | `/profiles/{handle}/overlap/{other}` | Subscription overlap + score |
 | `/notes/{noteId}/reactors?unsubscribedOnly=` | Who liked a note |
+| `/notes/{noteId}/restackers` | Who restacked a note |
+| `/notes/{noteId}/replies?publicationId=&cursor=` | Cursor-paginated note replies |
 | `/notes/{noteId}` | A single note |
 | `/notes/profile/{userId}` | A person's notes |
 | `/notes/profile/{userId}/context-users` | Connective users |
@@ -213,6 +223,10 @@ All `GET`. Browse and execute them at `/docs`.
 | `/publications/search?query=&page=` | Newsletter search |
 | `/publications/{subdomain}/archive` | Post list |
 | `/publications/{subdomain}/posts/{slug}` | One post |
+| `/publications/{subdomain}/posts/{postId}/facepile` | Small engagement preview |
+| `/publications/{subdomain}/posts/{postId}/reactors` | Who liked a post |
+| `/publications/{subdomain}/posts/{postId}/restackers` | Who restacked a post |
+| `/publications/{subdomain}/posts/{postId}/replies?publicationId=&cursor=` | Cursor-paginated post replies |
 | `/publications/{subdomain}/posts/{postId}/comments` | Comment thread |
 | `/publications/{subdomain}/posts/{postId}/commenters` | Deduped commenters |
 | `/publications/{subdomain}/recommendations?publicationId=` | Recommended publications |
@@ -228,10 +242,13 @@ Each file is runnable and prints compact output:
 
 ```bash
 npx tsx examples/profiles.ts        # lookup, search, id->handle, overlap scoring
-npx tsx examples/notes.ts           # cursor-walk feeds, reactors, "liked but not subscribed"
-npx tsx examples/publications.ts    # paged search -> archive walk -> harvest commenters
+npx tsx examples/notes.ts           # feeds, likes, restacks, replies, "liked but not subscribed"
+npx tsx examples/publications.ts    # archive -> post engagement -> harvest commenters
 npx tsx examples/discovery.ts       # categories -> leaderboard
 ```
+
+For copy/paste CLI and typed-client verification of every engagement endpoint,
+see [`docs/ENGAGEMENT-ENDPOINTS.md`](docs/ENGAGEMENT-ENDPOINTS.md).
 
 ## A worked targeting pipeline
 
@@ -308,14 +325,15 @@ Details and evidence for each in [`docs/UPSTREAM.md`](docs/UPSTREAM.md).
   (`publication/search`), and 25 (leaderboards). Publication archives do honor
   `limit` and page with `offset`.
 - **`publication/search` pages overlap** — dedupe by id.
-- **Feed pagination uses opaque cursors.** Pass `nextCursor` back unchanged and
+- **Feed and reply pagination use opaque cursors.** Pass `nextCursor` back unchanged and
   stop if it is absent or repeats.
 - **One category id is a string** (`"podcast"`), and it is a valid leaderboard id.
 - **Comment threads are gated** for some publications even though counts are
   public. An empty thread is not proof of no comments.
 - **Relationship lists are unpaginated.** The following list is capped at 200;
   `page`, `offset`, and `limit` all return the same first batch.
-- **`reaction_count` can exceed `reactors.length`.** Do not assume they agree.
+- **Aggregate reaction/restack counts can exceed the number of exposed people.**
+  Keep both counts; identity lists are a lower bound.
 
 ## Agent-friendly CLI
 

@@ -1,16 +1,19 @@
 /**
  * Schemas for Substack Notes.
  *
- * Ground truth verified live against four endpoints (fixtures: user id
- * `86433889` / handle `alialfredji`, note id `314595743`):
+ * Ground truth verified live against six endpoints (fixtures: user id
+ * `86433889` / handle `alialfredji`, note ids `314595743` and `337504999`):
  *
  *   - `GET /api/v1/comment/{noteId}/reactors`               — bare array
+ *   - `GET /api/v1/comment/{noteId}/restackers`             — bare array
+ *   - `GET /api/v1/reader/comment/{noteId}/replies`         — cursor envelope
  *   - `GET /api/v1/reader/comment/{noteId}`                 — `{ item }`
  *   - `GET /api/v1/reader/feed/profile/{userId}?types[]=...`— cursor envelope
  *   - `GET /api/v1/reader/feed?types[]=...`                 — cursor envelope + trackingParameters
  *
  * See the bottom of this file for endpoint-shape notes (pagination, `types[]`
- * variants, the restacks 404) that did not fit as a doc comment on one schema.
+ * variants, and reaction-count mismatches) that did not fit as a doc comment
+ * on one schema.
  */
 
 import { z } from 'zod';
@@ -24,7 +27,7 @@ import {
 } from './common.js';
 
 /**
- * A person who reacted to (liked) a note.
+ * A person who reacted to (liked or restacked) a note or post.
  *
  * Verified on the `314595743` fixture (5 elements, see the pagination note at
  * the bottom of this file for why that is *fewer* than the note's
@@ -54,10 +57,10 @@ export const ReactorSchema = z
     /** Free-text "writes {publication name}" string shown under the name. */
     writes: MaybeString,
   })
-  .describe('A person who reacted to a note.');
+  .describe('A person who liked or restacked a note or post.');
 export type Reactor = z.infer<typeof ReactorSchema>;
 
-/** `GET /comment/{noteId}/reactors` returns this bare array, not an envelope. */
+/** Reactor/restacker endpoints return this bare array, not an envelope. */
 export const ReactorListSchema = z.array(ReactorSchema);
 
 /**
@@ -148,7 +151,7 @@ export const NoteCommentSchema = z
     media_clip_id: MaybeString,
     reaction_count: MaybeNumber,
     /** Emoji -> count map, e.g. `{"❤": 6}`. No per-user breakdown; use {@link ReactorSchema}. */
-    reactions: z.record(z.string(), z.number()).nullish(),
+    reactions: z.object({}).catchall(z.number()).nullish(),
     restacks: MaybeNumber,
     restacked: MaybeBoolean,
     children_count: MaybeNumber,
@@ -265,8 +268,7 @@ export type NoteFeedPage = z.infer<typeof NoteFeedPageSchema>;
 // `pinned_entity_keys`, `context_timestamp`, `prepended_post_ids`,
 // `page_number`) is an implementation detail we should not depend on.
 //
-// Restackers endpoint: `GET /api/v1/comment/{noteId}/restacks` returns 404,
-// confirmed live on the `314595743` fixture. There is no dedicated "who
-// restacked this note" endpoint; `types[]=restack` on the profile feed is the
-// closest available signal, and it is scoped to one profile's own restacking
-// activity, not a given note's restackers.
+// Restackers endpoint: the working path is
+// `GET /api/v1/comment/{noteId}/restackers`. The superficially plausible
+// `/restacks` path returns 404. Verified live on note `337504999`, where the
+// endpoint returned three named accounts.

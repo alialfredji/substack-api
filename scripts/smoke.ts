@@ -35,7 +35,7 @@ function itemCount(body: unknown): number | null {
   if (Array.isArray(body)) return body.length;
   if (body === null || typeof body !== 'object') return null;
   const record = body as Record<string, unknown>;
-  for (const key of ['results', 'items', 'publications', 'comments']) {
+  for (const key of ['results', 'items', 'publications', 'comments', 'commentBranches', 'reactors', 'restackers']) {
     if (Array.isArray(record[key])) return (record[key] as unknown[]).length;
   }
   return null;
@@ -49,7 +49,17 @@ function summarise(body: unknown): string {
   if (body === null || typeof body !== 'object') return String(body);
   const record = body as Record<string, unknown>;
   const parts: string[] = [];
-  for (const key of ['results', 'items', 'publications', 'comments', 'overlap', 'categories']) {
+  for (const key of [
+    'results',
+    'items',
+    'publications',
+    'comments',
+    'commentBranches',
+    'reactors',
+    'restackers',
+    'overlap',
+    'categories',
+  ]) {
     if (Array.isArray(record[key])) parts.push(`${key}=${(record[key] as unknown[]).length}`);
   }
   if (typeof record['handle'] === 'string') parts.push(`handle=${record['handle']}`);
@@ -134,7 +144,8 @@ console.log(`  cookie: ${authenticated ? 'present' : 'absent (viewer-relative fi
 
 const SELF = 'alialfredji';
 const SELF_ID = 86433889;
-const NOTE_ID = 314595743;
+const NOTE_ID = 337504999;
+const NOTE_PUBLICATION_ID = 9341396;
 
 // ---------------------------------------------------------------------------
 // meta
@@ -166,6 +177,8 @@ await hit('notes: profile feed', `/notes/profile/${SELF_ID}`, { expectNonEmpty: 
 await hit('notes: suggested feed', '/notes/suggested');
 await hit('notes: single note', `/notes/${NOTE_ID}`);
 await hit('notes: reactors', `/notes/${NOTE_ID}/reactors`);
+await hit('notes: restackers', `/notes/${NOTE_ID}/restackers`);
+await hit('notes: replies', `/notes/${NOTE_ID}/replies?publicationId=${NOTE_PUBLICATION_ID}`);
 await hit('notes: context users', `/notes/profile/${SELF_ID}/context-users`);
 // Without a cookie this must fail loudly rather than return a worthless list.
 await hit('notes: unsubscribed reactors', `/notes/${NOTE_ID}/reactors?unsubscribedOnly=true`, {
@@ -179,6 +192,13 @@ await hit('notes: unsubscribed reactors', `/notes/${NOTE_ID}/reactors?unsubscrib
 await hit('publications: search', '/publications/search?query=ai&page=0', { expectNonEmpty: true });
 await hit('publications: archive', '/publications/platformer/archive?limit=3', { expectNonEmpty: true });
 if (postSlug) await hit('publications: post by slug', `/publications/platformer/posts/${postSlug}`);
+await hit('publications: facepile', `/publications/platformer/posts/${postId}/facepile`);
+await hit('publications: reactors', `/publications/platformer/posts/${postId}/reactors`);
+await hit('publications: restackers', `/publications/platformer/posts/${postId}/restackers`);
+await hit(
+  'publications: paginated replies',
+  `/publications/platformer/posts/${commentedId}/replies?publicationId=${publicationId}`,
+);
 await hit('publications: comments', `/publications/platformer/posts/${commentedId}/comments`);
 await hit('publications: commenters', `/publications/platformer/posts/${commentedId}/commenters`);
 if (publicationId) {

@@ -1,5 +1,5 @@
 /**
- * Newsletters: search, archive, single posts, comments, and the
+ * Newsletters: search, archive, single posts, engagement, and the
  * recommendation graph.
  *
  * Everything here that is scoped to one newsletter (`archive`, `getPost`,
@@ -25,11 +25,17 @@ import {
   ArchiveResponseSchema,
   PostSchema,
   CommentsEnvelopeSchema,
+  PostFacepileSchema,
+  ReaderRepliesPageSchema,
   type Post,
   type CommentsEnvelope,
   type Comment,
   type Commenter,
+  type PostFacepile,
+  type ReaderCommentBranch,
+  type ReaderRepliesPage,
 } from '../../schemas/post.js';
+import { ReactorListSchema, type Reactor } from '../../schemas/note.js';
 import type { Publication } from '../../schemas/common.js';
 
 /** Options for walking a publication archive with offset pagination. */
@@ -38,6 +44,20 @@ export interface ArchiveAllOptions extends PaginateOptions {
   pageSize?: number;
   /** Archive ordering forwarded to Substack. Default `new`. */
   sort?: string;
+}
+
+/** Query parameters for one cursor-paginated page of post replies. */
+export interface PostRepliesParams {
+  /** Publication id from the post's `publication_id` field. */
+  publicationId: number;
+  /** `nextCursor` from a previous replies page. */
+  cursor?: string;
+}
+
+/** Options for collecting multiple post-reply pages. */
+export interface CollectPostRepliesOptions extends PaginateOptions {
+  /** Publication id from the post's `publication_id` field. */
+  publicationId: number;
 }
 
 /**
@@ -247,6 +267,88 @@ export class PublicationsResource {
       cookie: opts?.cookie,
       signal: opts?.signal,
     });
+  }
+
+  /**
+   * Small post-page engagement preview.
+   *
+   * This is intentionally not the full list: live verification returned 5
+   * facepile reactors for a post whose full reactors endpoint returned 11.
+   */
+  async facepile(subdomain: string, postId: number, opts?: CallOptions): Promise<PostFacepile> {
+    return this.http.request(`/api/v1/post/${postId}/facepile`, {
+      baseUrl: publicationBaseUrl(subdomain),
+      schema: PostFacepileSchema,
+      cookie: opts?.cookie,
+      signal: opts?.signal,
+    });
+  }
+
+  /** Every account exposed by Substack as having liked this post. */
+  async reactors(subdomain: string, postId: number, opts?: CallOptions): Promise<Reactor[]> {
+    return this.http.request(`/api/v1/post/${postId}/reactors`, {
+      baseUrl: publicationBaseUrl(subdomain),
+      schema: ReactorListSchema,
+      cookie: opts?.cookie,
+      signal: opts?.signal,
+    });
+  }
+
+  /** Every account exposed by Substack as having restacked this post. */
+  async restackers(subdomain: string, postId: number, opts?: CallOptions): Promise<Reactor[]> {
+    return this.http.request(`/api/v1/post/${postId}/restackers`, {
+      baseUrl: publicationBaseUrl(subdomain),
+      schema: ReactorListSchema,
+      cookie: opts?.cookie,
+      signal: opts?.signal,
+    });
+  }
+
+  /** Fetch one cursor-paginated page of a post's modern reader reply branches. */
+  async replies(
+    subdomain: string,
+    postId: number,
+    params: PostRepliesParams,
+    opts?: CallOptions,
+  ): Promise<ReaderRepliesPage> {
+    return this.http.request(`/api/v1/reader/post/${postId}/replies`, {
+      baseUrl: publicationBaseUrl(subdomain),
+      query: { publication_id: params.publicationId, cursor: params.cursor },
+      schema: ReaderRepliesPageSchema,
+      cookie: opts?.cookie,
+      signal: opts?.signal,
+    });
+  }
+
+  /** Walk post-reply pages with bounds, cursor-cycle protection, and id deduplication. */
+  async collectReplies(
+    subdomain: string,
+    postId: number,
+    opts: CollectPostRepliesOptions,
+  ): Promise<ReaderCommentBranch[]> {
+    const limit = opts.limit ?? 100;
+    const maxPages = opts.maxPages ?? 20;
+    const byCommentId = new Map<number, ReaderCommentBranch>();
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+
+    for (let page = 0; page < maxPages && byCommentId.size < limit; page += 1) {
+      const result = await this.replies(
+        subdomain,
+        postId,
+        { publicationId: opts.publicationId, cursor },
+        { cookie: opts.cookie, signal: opts.signal },
+      );
+      for (const branch of result.commentBranches) {
+        if (!byCommentId.has(branch.comment.id)) byCommentId.set(branch.comment.id, branch);
+        if (byCommentId.size >= limit) break;
+      }
+      if (!result.nextCursor || seenCursors.has(result.nextCursor) || result.commentBranches.length === 0) break;
+      seenCursors.add(result.nextCursor);
+      cursor = result.nextCursor;
+    }
+
+    return [...byCommentId.values()].slice(0, limit);
   }
 
   /**

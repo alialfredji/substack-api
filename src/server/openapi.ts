@@ -138,14 +138,14 @@ export const OPENAPI_TAGS = [
   {
     name: 'notes',
     description:
-      'Substack Notes. Per-profile note feeds, the suggested-notes feed, single-note lookup, and — the most useful ' +
-      'endpoint here — the list of accounts that liked a note, each carrying `is_subscribed` and `is_following`.',
+      'Substack Notes. Per-profile and suggested feeds, single-note lookup, reactors, restackers, and ' +
+      'cursor-paginated reply branches.',
   },
   {
     name: 'publications',
     description:
-      'Newsletters. Keyword search, post archive, individual posts, post comments, and the recommendation graph ' +
-      '(which publications a given publication recommends).',
+      'Newsletters. Keyword search, post archive, reactors, restackers, cursor-paginated replies, legacy comment ' +
+      'trees, and the recommendation graph.',
   },
   {
     name: 'discovery',

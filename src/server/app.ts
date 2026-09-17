@@ -80,7 +80,7 @@ read \`false\` for everyone when anonymous. Supply one per request via the
 
 ### Politeness
 
-Requests are pooled at a bounded concurrency (default 4) with optional pacing.
+Requests are pooled at a bounded concurrency (default 1) with optional pacing.
 Substack publishes no rate limits and did not throttle 600 concurrent reads in
 testing, but that is not licence to hammer it.
 `.trim();

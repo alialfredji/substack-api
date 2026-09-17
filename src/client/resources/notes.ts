@@ -1,6 +1,6 @@
 /**
  * Substack Notes: per-profile and suggested feeds, single-note lookup, and
- * who reacted to a note.
+ * who liked, replied to, or restacked a note.
  *
  * The reason this resource exists is `unsubscribedReactors`: cross-referencing
  * a note's reactors against `is_subscribed` is the single most actionable
@@ -21,6 +21,11 @@ import {
   type NoteContextUser,
   type Reactor,
 } from '../../schemas/note.js';
+import {
+  ReaderRepliesPageSchema,
+  type ReaderCommentBranch,
+  type ReaderRepliesPage,
+} from '../../schemas/post.js';
 
 /** Query params accepted by both feed endpoints. */
 export interface NoteFeedParams {
@@ -40,6 +45,24 @@ export interface NoteFeedParams {
 export interface CollectNoteFeedOptions extends PaginateOptions {
   /** Feed item types to include. Defaults to `['note']`. */
   types?: string[];
+}
+
+/** Query parameters for one cursor-paginated page of note replies. */
+export interface NoteRepliesParams {
+  /** Publication id from the note's `comment.publication_id` field. */
+  publicationId: number;
+  /** `nextCursor` from a previous replies page. */
+  cursor?: string;
+  /** Ask upstream for only top-level branches. Defaults to false. */
+  onlyTopLevel?: boolean;
+}
+
+/** Options for collecting multiple note-reply pages. */
+export interface CollectNoteRepliesOptions extends PaginateOptions {
+  /** Publication id from the note's `comment.publication_id` field. */
+  publicationId: number;
+  /** Ask upstream for only top-level branches. Defaults to false. */
+  onlyTopLevel?: boolean;
 }
 
 /** Notes: feeds, single notes, and who reacted to them. */
@@ -104,6 +127,61 @@ export class NotesResource {
       cookie: opts?.cookie,
       signal: opts?.signal,
     });
+  }
+
+  /** Every account exposed by Substack as having restacked this note. */
+  async restackers(noteId: number, opts?: CallOptions): Promise<Reactor[]> {
+    return this.http.request(`/api/v1/comment/${noteId}/restackers`, {
+      schema: ReactorListSchema,
+      cookie: opts?.cookie,
+      signal: opts?.signal,
+    });
+  }
+
+  /**
+   * Fetch one cursor-paginated page of replies to a note.
+   *
+   * Each page is organised as top-level `commentBranches`; replies nested
+   * below a branch are exposed in `descendantComments`.
+   */
+  async replies(noteId: number, params: NoteRepliesParams, opts?: CallOptions): Promise<ReaderRepliesPage> {
+    return this.http.request(`/api/v1/reader/comment/${noteId}/replies`, {
+      query: {
+        publication_id: params.publicationId,
+        comment_id: noteId,
+        cursor: params.cursor,
+        only_top_level: params.onlyTopLevel ? '1' : undefined,
+      },
+      schema: ReaderRepliesPageSchema,
+      cookie: opts?.cookie,
+      signal: opts?.signal,
+    });
+  }
+
+  /** Walk note-reply pages with bounds, cursor-cycle protection, and id deduplication. */
+  async collectReplies(noteId: number, opts: CollectNoteRepliesOptions): Promise<ReaderCommentBranch[]> {
+    const limit = opts.limit ?? 100;
+    const maxPages = opts.maxPages ?? 20;
+    const byCommentId = new Map<number, ReaderCommentBranch>();
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+
+    for (let page = 0; page < maxPages && byCommentId.size < limit; page += 1) {
+      const result = await this.replies(
+        noteId,
+        { publicationId: opts.publicationId, cursor, onlyTopLevel: opts.onlyTopLevel },
+        { cookie: opts.cookie, signal: opts.signal },
+      );
+      for (const branch of result.commentBranches) {
+        if (!byCommentId.has(branch.comment.id)) byCommentId.set(branch.comment.id, branch);
+        if (byCommentId.size >= limit) break;
+      }
+      if (!result.nextCursor || seenCursors.has(result.nextCursor) || result.commentBranches.length === 0) break;
+      seenCursors.add(result.nextCursor);
+      cursor = result.nextCursor;
+    }
+
+    return [...byCommentId.values()].slice(0, limit);
   }
 
   /**
